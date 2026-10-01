@@ -198,6 +198,6 @@ const App = (() => {
       tonePill(t.tone)}</a>`).join('')).join('')}</div></div>`;
   const hue = s => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const srcBadge = s => `<span class="badge" style="background:hsl(${hue(s)} 62% 46%)">${esc(s)}</span>`;
-  return {$, esc, safeUrl, ago, clock, api, spark, tonePill, toneInfo, countUp, countdown, toast, ready, tape, srcBadge, store,
+  return {$, esc, safeUrl, ago, clock, api, spark, tonePill, toneInfo, countUp, countdown, toast, ready, tape, srcBadge, store, hue,
           money, compact, pctTxt, dirCls, dayLabel, shortDay, priceChart, stockPanel, summaryHTML, stockSummary};
 })();

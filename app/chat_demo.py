@@ -49,8 +49,9 @@ def _compose(tool: str, data) -> str:
 
 
 class _Stream:
-    def __init__(self, messages):
+    def __init__(self, messages, tools=()):
         self.messages, self.final = messages, None
+        self.web = any(t.get("name") == "web_search" for t in tools)
 
     async def __aenter__(self):
         return self
@@ -61,6 +62,20 @@ class _Stream:
     async def __aiter__(self):
         last = self.messages[-1]
         usage = NS(input_tokens=0, output_tokens=0, cache_read_input_tokens=0)
+        if isinstance(last["content"], str) and self.web and "web" in last["content"].lower():  # simulated web search
+            q = NS(type="server_tool_use", id="srvtoolu_demo", name="web_search", input={"query": last["content"][:60]})
+            res = NS(type="web_search_tool_result", tool_use_id="srvtoolu_demo",
+                     content=[NS(type="web_search_result", url=f"https://example.com/demo/{i}", title=f"Demo result {i}: not a real web page") for i in (1, 2)])
+            yield NS(type="content_block_start", content_block=q)
+            await asyncio.sleep(0.4)
+            yield NS(type="content_block_start", content_block=res)
+            text = "*Demo mode — this simulated a web search; the sources below are placeholders, not real pages.*\n\nA live run would summarise what the web says here and cite the outlets."
+            for i in range(0, len(text), 14):
+                yield NS(type="text", text=text[i:i + 14])
+                await asyncio.sleep(0.012)
+            cites = [NS(url=r.url, title=r.title) for r in res.content[:1]]
+            self.final = NS(content=[q, res, NS(type="text", text=text, citations=cites)], stop_reason="end_turn", usage=usage)
+            return
         if isinstance(last["content"], str):  # fresh question -> call a tool
             name, args = _pick(last["content"])
             blk = NS(type="tool_use", id="toolu_demo", name=name, input=args)
@@ -82,4 +97,4 @@ class _Stream:
 
 class DemoClient:
     def __init__(self):
-        self.beta = NS(messages=NS(stream=lambda **kw: _Stream(kw["messages"])))
+        self.beta = NS(messages=NS(stream=lambda **kw: _Stream(kw["messages"], kw.get("tools", ()))))

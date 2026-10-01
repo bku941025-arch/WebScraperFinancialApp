@@ -128,6 +128,7 @@ class ChatMessage(BaseModel):
 
 class ChatIn(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=60)
+    web: bool = False
 
 
 @app.get("/api/chat/status")
@@ -141,7 +142,7 @@ async def api_chat(body: ChatIn, request: Request):
         raise HTTPException(503, "Chat is not configured: set ANTHROPIC_API_KEY and restart.")
     if not chat.limiter.allow(request.client.host if request.client else "?"):
         raise HTTPException(429, "Too many questions — please wait a few minutes.")
-    return StreamingResponse(chat.stream_chat([m.model_dump() for m in body.messages]), media_type="text/event-stream",
+    return StreamingResponse(chat.stream_chat([m.model_dump() for m in body.messages], web=body.web and chat.web_enabled()), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

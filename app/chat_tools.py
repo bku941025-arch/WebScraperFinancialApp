@@ -62,6 +62,7 @@ LABELS = {
     "get_upcoming_earnings": "Checking the earnings calendar",
     "find_ticker": "Looking up ticker",
     "get_market_overview": "Scanning markets",
+    "web_search": "Searching the web",
 }
 
 

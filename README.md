@@ -54,6 +54,11 @@ Markdown tables, and clickable `$TICKER` links.
 export ANTHROPIC_API_KEY="sk-ant-..."        # required for real answers
 export FINTREND_MODEL=claude-sonnet-5-5      # optional; default claude-opus-5-5 (Sonnet is cheaper/faster)
 ```
+- **Web search (opt-in, off by default):** set `FINTREND_WEB_SEARCH=1` on the server and a **🌐 Web** toggle appears in the chat
+  composer. When it's on for a question, the assistant may use Anthropic's server-side web search for things the app's feeds don't
+  cover (breaking news, announcements, macro context) and shows a **Sources** row of the outlets it cited. It still uses the app's
+  own tools for prices, trends and earnings. Each question is capped at `FINTREND_WEB_MAX_USES` searches (default 4); searches are
+  billed per use on top of tokens, so check Anthropic's current pricing. Web text is treated as untrusted.
 - It gives analysis and views grounded in data, framed as information rather than personalised advice, and says when data is thin.
 - Safeguards: tool results are treated as untrusted text, per-IP rate limit (20 questions / 10 min), a cap on tool rounds
   per question, and conversation history lives only in your browser (localStorage; "New chat" clears it).

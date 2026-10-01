@@ -300,3 +300,14 @@ footer{color:var(--mut);font-size:12.5px;text-align:center;padding:10px 20px 40p
 .send:hover:not(:disabled){transform:scale(1.09) rotate(-8deg)}.send:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 .send.stop{background:var(--fg);color:var(--bg)}
 .hint{display:flex;justify-content:space-between;gap:10px;margin-top:7px;padding:0 10px;color:var(--mut);font-size:12px}
+
+.webtog{flex:none;align-self:center;border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:999px;padding:7px 13px;font-size:12.5px;font-weight:800;cursor:pointer;transition:.2s;white-space:nowrap}
+.webtog:hover{color:var(--fg);border-color:var(--a2)}
+.webtog.on{color:#fff;border-color:transparent;background:linear-gradient(135deg,#0ea5e9,var(--a2));box-shadow:0 4px 14px rgba(14,165,233,.4)}
+.webtog[hidden]{display:none}
+.sources{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 4px}
+.sources .lbl{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-right:2px}
+.source-pill{display:inline-flex;align-items:center;gap:7px;max-width:260px;padding:4px 11px 4px 5px;border-radius:999px;border:1px solid var(--line);background:color-mix(in srgb,var(--a1) 6%,transparent);font-size:12.5px;font-weight:700;transition:.2s}
+.source-pill:hover{border-color:var(--a2);transform:translateY(-1px)}
+.source-pill i{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;color:#fff}
+.source-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

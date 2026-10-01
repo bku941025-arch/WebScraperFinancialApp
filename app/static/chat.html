@@ -23,6 +23,7 @@
 <div class="composer-bar"><div class="wrap">
   <form class="composer" id="form">
     <textarea id="box" rows="1" maxlength="2000" placeholder="Ask about a stock, a sector, earnings, or what's bullish…" aria-label="Message"></textarea>
+    <button class="webtog" id="web" type="button" hidden aria-pressed="false" title="Let the assistant search the web for this question (uses extra API credits)">🌐 Web</button>
     <button class="send" id="send" type="submit" aria-label="Send">➤</button>
   </form>
   <div class="hint"><span>Enter to send · Shift+Enter for a new line</span><span>Information only — not personalised financial advice.</span></div>
@@ -31,9 +32,10 @@
 App.ready('/chat', async () => {
   const {$, esc, api} = App;
   const KEY = 'chat:v1', MAX_HIST = 24;
-  const st = {msgs: [], busy: false, ctrl: null, status: null};
+  const st = {msgs: [], busy: false, ctrl: null, status: null, web: false};
+  try { st.web = localStorage.getItem('chat:web') === '1'; } catch {}
   try { st.msgs = (JSON.parse(localStorage.getItem(KEY) || '[]') || []).filter(m => m && m.role && typeof m.content === 'string'); } catch {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st.msgs.slice(-40).map(m => ({role: m.role, content: m.content, tools: m.tools})))); } catch {} };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st.msgs.slice(-40).map(m => ({role: m.role, content: m.content, tools: m.tools, sources: m.sources})))); } catch {} };
 
   // ---------- small, safe markdown renderer (HTML is escaped first; only http(s) links)
   function inline(s) {
@@ -81,6 +83,7 @@ App.ready('/chat', async () => {
     el.innerHTML = `<div class="orb ${live ? 'think' : ''}"><span>✨</span></div><div class="bub">
       ${chips ? `<div class="tools">${chips}</div>` : ''}
       ${m.content ? `<div class="md ${live ? 'caret' : ''}">${md(m.content)}</div>` : (live && !chips ? '<div class="typing"><i></i><i></i><i></i></div>' : '')}
+      ${m.sources && m.sources.length ? `<div class="sources"><span class="lbl">${m.sources[0].cited ? 'Sources' : 'Searched'}</span>${m.sources.map(x => `<a class="source-pill" href="${App.safeUrl(x.url)}" target="_blank" rel="noopener noreferrer" title="${esc(x.title)}"><i style="background:hsl(${App.hue(x.site)} 60% 45%)">${esc((x.site[0] || '?').toUpperCase())}</i><span>${esc(x.site)}</span></a>`).join('')}</div>` : ''}
       ${m.notice ? `<div class="note">${esc(m.notice)}</div>` : ''}
       ${m.err ? `<div class="err">⚠ ${esc(m.err)} <button class="chip sm" data-act="retry">Try again</button></div>` : ''}
       ${!live && m.content ? `<div class="msg-actions ${last ? 'show' : ''}"><button class="mini-btn" data-act="copy" data-i="${i}">⧉ Copy</button>${last ? '<button class="mini-btn" data-act="regen">↻ Regenerate</button>' : ''}</div>` : ''}</div>`;
@@ -112,7 +115,7 @@ App.ready('/chat', async () => {
     const hist = st.msgs.slice(0, -1).filter(m => m.content && !m.err).map(m => ({role: m.role, content: m.content.slice(0, 5900)})).slice(-MAX_HIST);
     const ai = st.msgs[st.msgs.length - 1]; st.ctrl = new AbortController();
     try {
-      const res = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({messages: hist}), signal: st.ctrl.signal});
+      const res = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({messages: hist, web: st.web}), signal: st.ctrl.signal});
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(typeof j.detail === 'string' ? j.detail : 'Request failed (' + res.status + ')'); }
       const rd = res.body.getReader(), dec = new TextDecoder(); let buf = '';
       for (;;) {
@@ -124,6 +127,7 @@ App.ready('/chat', async () => {
           else if (e.type === 'tool_start') ai.tools.push({id: e.id, label: e.label, done: false});
           else if (e.type === 'tool_done') { const t = ai.tools.find(t => t.id === e.id); if (t) { t.done = true; t.ok = e.ok; } }
           else if (e.type === 'notice') ai.notice = e.text;
+          else if (e.type === 'sources') ai.sources = e.items;
           else if (e.type === 'error') ai.err = e.message;
           paint(); }
       }
@@ -147,6 +151,9 @@ App.ready('/chat', async () => {
 
   try { st.status = await api('/api/chat/status'); } catch { st.status = {configured: true}; }
   if (st.status.model) { const t = $('#model'); t.style.display = ''; t.textContent = st.status.demo ? '🧪 Demo mode' : '⚡ ' + st.status.model; }
+  const webBtn = $('#web'), paintWeb = () => { webBtn.classList.toggle('on', st.web); webBtn.setAttribute('aria-pressed', st.web); };
+  if (st.status.web_search) { webBtn.hidden = false; paintWeb();
+    webBtn.onclick = () => { st.web = !st.web; try { localStorage.setItem('chat:web', st.web ? '1' : '0'); } catch {} paintWeb(); App.toast(st.web ? '🌐 Web search on for your next questions' : 'Web search off'); box.focus(); }; }
   if (!st.status.configured) { box.disabled = true; $('#send').disabled = true; box.placeholder = 'Set ANTHROPIC_API_KEY to enable the assistant…'; }
   renderAll(); grow();
 
