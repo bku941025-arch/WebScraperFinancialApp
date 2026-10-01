@@ -1,8 +1,9 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data.db"
+DB_PATH = Path(os.getenv("FINTREND_DB") or Path(__file__).resolve().parent.parent / "data.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
@@ -23,6 +24,22 @@ CREATE TABLE IF NOT EXISTS mentions (
     PRIMARY KEY (article_id, ticker)
 );
 CREATE INDEX IF NOT EXISTS idx_mentions_ticker ON mentions(ticker);
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY,
+    started_at REAL NOT NULL,
+    finished_at REAL NOT NULL,
+    trigger TEXT NOT NULL,        -- e.g. "US open", "manual", "startup"
+    new_articles INTEGER NOT NULL,
+    feeds_ok INTEGER NOT NULL,
+    feeds_failed INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_health (
+    source TEXT PRIMARY KEY,
+    last_attempt REAL NOT NULL,
+    last_ok REAL,
+    ok INTEGER NOT NULL,
+    last_new INTEGER NOT NULL DEFAULT 0
+);
 """
 
 

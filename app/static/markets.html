@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend — Markets</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body><div class="wrap">
+  <section class="hero"><h1>The world, <span class="grad">region by region</span></h1>
+  <p>Where the coverage is, and who's getting it. Bigger bubbles mean hotter trend scores; colour shows headline tone.</p></section>
+  <div class="controls"><div class="chips" id="hours"></div></div>
+  <h2 class="sec">Trend cloud</h2>
+  <div class="card" style="margin-bottom:26px"><div class="cloud" id="cloud"></div>
+    <div class="legend"><span style="color:var(--up)">● bullish headlines</span><span style="color:var(--a1)">● neutral</span><span style="color:var(--down)">● bearish</span></div></div>
+  <h2 class="sec">By region</h2><div class="tiles" id="tiles"></div>
+</div>
+<script>
+App.ready('/markets', () => {
+  const {$, esc} = App; let hours = 24;
+  const H = [[6, '6h'], [24, '24h'], [72, '3 days'], [168, '7 days']];
+  const paint = () => { $('#hours').innerHTML = H.map(([v, l]) => `<button class="chip ${v === hours ? 'on' : ''}" data-v="${v}">${l}</button>`).join(''); };
+  $('#hours').onclick = e => { const b = e.target.closest('.chip'); if (b) { hours = +b.dataset.v; paint(); load(); } }; paint();
+  async function load() {
+    const d = await App.api('/api/markets?hours=' + hours), max = Math.max(1, ...d.cloud.map(c => c.score));
+    $('#cloud').innerHTML = d.cloud.map((c, i) => `<a class="bubble rise ${c.tone > .15 ? 'up' : c.tone < -.15 ? 'down' : 'flat'}" style="--i:${i};font-size:${(13 + 26 * Math.sqrt(c.score / max)).toFixed(1)}px"
+      href="/company/${encodeURIComponent(c.ticker)}" data-tip="${esc(c.name)} · ${c.mentions} mentions">${esc(c.ticker)}</a>`).join('') || '<div class="empty">No data yet.</div>';
+    $('#tiles').innerHTML = d.regions.map((r, i) => { const m = Math.max(1, ...r.top.map(x => x.n));
+      return `<div class="card hover rise" style="--i:${i}"><div style="display:flex;justify-content:space-between;align-items:baseline"><div class="tk">${esc(r.region)}</div>
+        <span class="src">${r.articles} articles${r.press_releases ? ' · ' + r.press_releases + ' PR' : ''}</span></div><div style="margin-top:8px">
+        ${r.top.map(x => `<a class="mini" href="/company/${encodeURIComponent(x.ticker)}" data-tip="${esc(x.name)}"><span style="width:76px">${esc(x.ticker)}</span>
+          <div class="bar" style="width:${x.n / m * 100}%"></div><span class="src">${x.n}</span></a>`).join('') || '<span class="src">No company mentions</span>'}</div></div>`; }).join('');
+  }
+  load();
+});
+</script></body></html>

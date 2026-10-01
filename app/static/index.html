@@ -1,45 +1,91 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FinTrend</title>
-<style>
-:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ee;--mut:#8b91a1;--acc:#4ea1ff;--up:#3ecf8e;--pr:#f5a524}
-@media(prefers-color-scheme:light){:root{--bg:#f4f5f8;--card:#fff;--fg:#1a1d24;--mut:#6a7080;--acc:#1f6feb;--up:#17915f;--pr:#b97300}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
-header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:16px;max-width:1200px;margin:auto}
-h1{margin:0;font-size:20px;flex:1}select,button{background:var(--card);color:var(--fg);border:1px solid #2a2f3a;border-radius:8px;padding:7px 10px;font:inherit}
-button{cursor:pointer}main{display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:0 16px 32px;max-width:1200px;margin:auto}
-@media(max-width:800px){main{grid-template-columns:1fr}}
-.card{background:var(--card);border-radius:12px;padding:14px 16px;margin-bottom:12px}
-.row{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.tk{font-weight:700;color:var(--acc)}.mut{color:var(--mut);font-size:13px}.up{color:var(--up)}.pr{color:var(--pr)}
-.bar{height:4px;background:var(--acc);border-radius:2px;margin:6px 0 8px}
-a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}ul{margin:6px 0 0;padding-left:18px}
-h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
-</style></head><body>
-<header><h1>📈 FinTrend</h1>
-<select id="hours"><option value="6">Last 6h</option><option value="24" selected>Last 24h</option><option value="72">Last 3d</option><option value="168">Last 7d</option></select>
-<select id="region"><option value="">All regions</option></select>
-<button id="refresh">Refresh feeds</button></header>
-<main><section><h2>Trending companies &amp; assets</h2><div id="trends"></div></section>
-<aside><h2>Latest press releases &amp; announcements</h2><div id="ann"></div></aside></main>
+<title>FinTrend — Dashboard</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body>
+<div id="tape"></div>
+<div class="wrap">
+  <section class="hero">
+    <h1>What the world's markets are <span class="grad">talking about</span></h1>
+    <p>Companies, tickers and announcements ranked by how fast the news is moving — across US, European, Asian and global sources, plus first-party press releases.</p>
+    <div class="stats">
+      <div class="stat"><div class="n" id="s-art">–</div><div class="l">articles in last 24h</div></div>
+      <div class="stat"><div class="n" id="s-co">–</div><div class="l">companies mentioned</div></div>
+      <div class="stat"><div class="n" id="s-pr">–</div><div class="l">press releases</div></div>
+      <div class="stat"><div class="n" style="font-size:22px;padding:5px 0" id="s-next">–</div><div class="l" id="s-next-l">next scheduled scrape</div></div>
+    </div>
+  </section>
+  <div class="controls">
+    <div class="chips" id="hours"></div>
+    <div class="chips" id="regions"></div>
+    <input class="search" id="q" placeholder="Filter by company or ticker…" autocomplete="off">
+  </div>
+  <div class="grid">
+    <main><h2 class="sec">Trending now</h2><div class="spot" id="spot"></div><div class="rows" id="rows"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></main>
+    <aside>
+      <h2 class="sec">🚀 Rising fast</h2><div class="card" id="rising"></div>
+      <h2 class="sec" style="margin-top:22px">📣 Latest press releases</h2><div class="card" id="pr"></div>
+      <a class="crumb" href="/feed">See all news &amp; releases →</a>
+    </aside>
+  </div>
+</div>
 <script>
-const $=id=>document.getElementById(id);
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const ago=t=>{const m=Math.max(0,(Date.now()/1000-t)/60|0);return m<60?m+'m ago':m<1440?(m/60|0)+'h ago':(m/1440|0)+'d ago'};
-const safeUrl=u=>/^https?:\/\//i.test(u)?esc(u):'#';
-async function load(){
-  const q=new URLSearchParams({hours:$('hours').value});if($('region').value)q.set('region',$('region').value);
-  const [t,a]=await Promise.all([fetch('/api/trends?'+q).then(r=>r.json()),fetch('/api/announcements').then(r=>r.json())]);
-  const max=Math.max(1,...t.map(x=>x.score));
-  $('trends').innerHTML=t.length?t.map(x=>`<div class="card"><div class="row"><span><span class="tk">${esc(x.ticker)}</span> ${esc(x.name)}</span>
-    <span class="mut">${x.mentions} mentions · ${x.sources} sources${x.press_releases?` · <span class="pr">${x.press_releases} PR</span>`:''}${x.momentum>0?` · <span class="up">▲${x.momentum}</span>`:''}</span></div>
-    <div class="bar" style="width:${x.score/max*100}%"></div><ul>${x.headlines.map(h=>`<li><a href="${safeUrl(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a> <span class="mut">${esc(h.source)} · ${ago(h.published_at)}</span></li>`).join('')}</ul></div>`).join('')
-    :'<div class="card mut">No data yet — click “Refresh feeds”.</div>';
-  $('ann').innerHTML=a.map(x=>`<div class="card"><a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>
-    <div class="mut">${esc(x.source)} · ${ago(x.published_at)}${x.tickers.length?' · '+x.tickers.map(esc).join(', '):''}</div></div>`).join('')||'<div class="card mut">None yet.</div>';
-}
-fetch('/api/regions').then(r=>r.json()).then(rs=>rs.forEach(r=>$('region').add(new Option(r,r))));
-$('hours').onchange=$('region').onchange=load;
-$('refresh').onclick=async()=>{$('refresh').textContent='Fetching…';await fetch('/api/refresh',{method:'POST'});$('refresh').textContent='Refresh feeds';load()};
-load();setInterval(load,60000);
+App.ready('/', () => {
+  const {$, esc, spark, tonePill, ago, safeUrl} = App;
+  const st = {hours: +(App.store.get('hours') || 24), region: '', q: '', data: [], open: new Set()};
+  const HOURS = [[6, '6h'], [24, '24h'], [72, '3 days'], [168, '7 days']];
+  const chips = (el, items, key) => { $(el).innerHTML = items.map(([v, l]) =>
+      `<button class="chip ${st[key] == v ? 'on' : ''}" data-v="${esc(v)}">${esc(l)}</button>`).join('');
+    $(el).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; st[key] = key === 'hours' ? +b.dataset.v : b.dataset.v;
+      if (key === 'hours') App.store.set('hours', st.hours); chips(el, items, key); load(); }; };
+  chips('#hours', HOURS, 'hours');
+  App.api('/api/regions').then(r => chips('#regions', [['', 'All regions'], ...r.map(x => [x, x])], 'region'));
+  $('#q').oninput = e => { st.q = e.target.value.trim().toLowerCase(); render(); };
+
+  const cardLink = t => `/company/${encodeURIComponent(t.ticker)}`;
+  const tags = t => `<span class="tag">${t.mentions} mentions</span><span class="tag">${t.sources} sources</span>${
+    t.press_releases ? `<span class="tag pr">📣 ${t.press_releases} PR</span>` : ''}${
+    t.momentum > 0 ? `<span class="tag up" data-tip="More mentions in the last 6h than the 6h before">▲ +${t.momentum}</span>` :
+    t.momentum < 0 ? `<span class="tag down" data-tip="Fewer mentions in the last 6h than the 6h before">▼ ${t.momentum}</span>` : ''}`;
+
+  function render() {
+    const list = st.data.filter(t => !st.q || t.ticker.toLowerCase().includes(st.q) || t.name.toLowerCase().includes(st.q));
+    const spotN = st.q ? 0 : 3, max = Math.max(1, ...st.data.map(t => t.score));
+    $('#spot').innerHTML = list.slice(0, spotN).map((t, i) => `
+      <a class="card hover rise" style="--i:${i}" href="${cardLink(t)}"><span class="rank">${i + 1}</span>
+        <div class="tk">${esc(t.ticker)}</div><div class="nm">${esc(t.name)}</div>
+        <div class="big">${t.score.toFixed(1)}<small>trend score</small></div>${spark(t.spark, {w: 220, h: 56})}
+        <div class="tags">${tags(t)}${tonePill(t.tone)}</div>
+        <div class="hl">${esc(t.headlines[0]?.title)}</div></a>`).join('');
+    $('#rows').innerHTML = list.slice(spotN).map((t, i) => `
+      <div class="card row rise ${st.open.has(t.ticker) ? 'open' : ''}" style="--i:${i}" data-t="${esc(t.ticker)}">
+        <div class="row-h"><span class="r">${i + spotN + 1}</span>
+          <div><div class="tk" style="font-size:17px">${esc(t.ticker)}</div><div class="nm">${esc(t.name)}</div>
+            <div class="bar" style="width:${t.score / max * 100}%;margin-top:6px"></div></div>
+          <div class="spark-c">${spark(t.spark, {w: 120, h: 32})}</div>
+          <div class="meta">${tags(t)}${tonePill(t.tone)}<span class="chev">›</span></div></div>
+        <div class="more"><div><div class="in"><ul>${t.headlines.map(h => `<li><a href="${safeUrl(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>
+          <div class="src">${esc(h.source)} · ${ago(h.published_at)}${h.kind === 'press_release' ? ' · 📣 press release' : ''}</div></li>`).join('')}</ul>
+          <a class="tag" href="${cardLink(t)}" style="display:inline-block">Open ${esc(t.ticker)} deep-dive →</a></div></div></div></div>`).join('')
+      || (list.length ? '' : '<div class="card empty"><b>🔍</b>Nothing matches yet. If this is a fresh install, the first scrape runs at startup — or open <a href="/status" style="color:var(--a1)">Scrape Status</a> and hit “Run now”.</div>');
+  }
+  $('#rows').onclick = e => { const row = e.target.closest('.row'); if (!row || e.target.closest('a')) return;
+    const t = row.dataset.t; row.classList.toggle('open'); st.open.has(t) ? st.open.delete(t) : st.open.add(t); };
+
+  async function load() {
+    const [tr, pr, ov] = await Promise.all([
+      App.api(`/api/trends?hours=${st.hours}&limit=30${st.region ? '&region=' + encodeURIComponent(st.region) : ''}`),
+      App.api('/api/feed?kind=press_release&limit=7&hours=72'), App.api('/api/overview')]);
+    st.data = tr; render();
+    $('#tape').innerHTML = tr.length ? App.tape(tr.slice(0, 14)) : '';
+    $('#rising').innerHTML = tr.filter(t => t.momentum > 0).sort((a, b) => b.momentum - a.momentum).slice(0, 5).map(t => `
+      <a class="item" href="${cardLink(t)}"><div style="display:flex;justify-content:space-between"><b>${esc(t.ticker)}</b>
+      <span class="tag up">▲ +${t.momentum}</span></div><div class="src">${esc(t.name)}</div></a>`).join('') || '<div class="src">Nothing accelerating right now.</div>';
+    $('#pr').innerHTML = pr.map(x => `<a class="item" href="${safeUrl(x.url)}" target="_blank" rel="noopener"><div class="t">${esc(x.title)}</div>
+      <div class="src">${esc(x.source)} · ${ago(x.published_at)}${x.tickers.length ? ' · ' + x.tickers.slice(0, 3).map(esc).join(', ') : ''}</div></a>`).join('') || '<div class="src">No press releases yet.</div>';
+    App.countUp($('#s-art'), ov.articles_24h); App.countUp($('#s-co'), ov.companies_24h); App.countUp($('#s-pr'), ov.press_24h);
+    if (ov.next[0]) { clearInterval(load.cd); load.cd = App.countdown($('#s-next'), ov.next[0].at); $('#s-next-l').textContent = 'until ' + ov.next[0].label + ' scrape'; }
+  }
+  load().catch(() => $('#rows').innerHTML = '<div class="card empty">Couldn’t reach the API.</div>');
+  setInterval(() => load().catch(() => {}), 60000);
+});
 </script></body></html>

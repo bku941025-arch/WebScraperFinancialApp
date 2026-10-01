@@ -60,13 +60,31 @@ async def _fetch(client: httpx.AsyncClient, src: Source) -> tuple[Source, bytes 
         return src, None
 
 
-async def scrape_all() -> dict[str, int]:
+def record_run(trigger: str, started: float, report: dict[str, int]) -> None:
+    now = time.time()
+    ok = sum(1 for n in report.values() if n >= 0)
+    with session() as conn:
+        conn.execute("INSERT INTO runs(started_at,finished_at,trigger,new_articles,feeds_ok,feeds_failed)"
+                     " VALUES(?,?,?,?,?,?)",
+                     (started, now, trigger, sum(n for n in report.values() if n > 0), ok, len(report) - ok))
+        for name, n in report.items():
+            conn.execute(
+                "INSERT INTO source_health(source,last_attempt,last_ok,ok,last_new) VALUES(?,?,?,?,?)"
+                " ON CONFLICT(source) DO UPDATE SET last_attempt=excluded.last_attempt,"
+                " last_ok=COALESCE(excluded.last_ok, last_ok), ok=excluded.ok,"
+                " last_new=CASE WHEN excluded.ok THEN excluded.last_new ELSE last_new END",
+                (name, now, now if n >= 0 else None, int(n >= 0), max(n, 0)))
+
+
+async def scrape_all(trigger: str = "manual") -> dict[str, int]:
     """Returns {source name: new article count} (-1 if the feed failed)."""
+    started = time.time()
     async with httpx.AsyncClient(headers={"User-Agent": UA}, timeout=15, follow_redirects=True) as client:
         results = await asyncio.gather(*(_fetch(client, s) for s in SOURCES))
     report = {}
     for src, content in results:
         report[src.name] = -1 if content is None else store(parse_feed(src, content))
+    record_run(trigger, started, report)
     return report
 
 

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend — Company</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body><div class="wrap">
+  <a class="crumb" href="/">← Dashboard</a>
+  <section class="hero" style="padding-top:14px"><h1><span class="grad" id="tk">…</span></h1><p id="nm"></p>
+    <div class="tags" id="meta" style="margin-top:14px"></div></section>
+  <div class="controls"><div class="chips" id="hours"></div></div>
+  <h2 class="sec">Mentions over time <span class="src" style="text-transform:none;letter-spacing:0">(orange = press releases)</span></h2>
+  <div class="card" style="margin-bottom:18px"><svg class="chart" id="chart" preserveAspectRatio="none"></svg><div class="src" id="axis" style="display:flex;justify-content:space-between"></div></div>
+  <div class="two" style="margin-bottom:18px">
+    <div class="card"><h2 class="sec">Coverage by source</h2><div id="srcs"></div></div>
+    <div class="card"><h2 class="sec">Often mentioned with</h2><div class="tags" id="rel" style="margin:0"></div><h2 class="sec" style="margin-top:22px">By region</h2><div id="regs"></div></div>
+  </div>
+  <h2 class="sec">Latest coverage</h2><div id="arts" style="max-width:860px;margin-bottom:40px"></div>
+</div>
+<script>
+App.ready('', () => {
+  const {$, esc, ago, safeUrl, srcBadge, tonePill} = App;
+  const ticker = decodeURIComponent(location.pathname.split('/').pop()).toUpperCase(); let hours = 72;
+  document.title = 'FinTrend — ' + ticker;
+  const H = [[24, '24h'], [72, '3 days'], [168, '7 days']];
+  const paint = () => { $('#hours').innerHTML = H.map(([v, l]) => `<button class="chip ${v === hours ? 'on' : ''}" data-v="${v}">${l}</button>`).join(''); };
+  $('#hours').onclick = e => { const b = e.target.closest('.chip'); if (b) { hours = +b.dataset.v; paint(); load(); } }; paint();
+  const bars = (rows, tipWord) => { const m = Math.max(1, ...rows.map(r => r.n));
+    return rows.slice(0, 8).map(r => `<div class="mini"><span style="width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.name)}</span>
+      <div class="bar" style="width:${r.n / m * 100}%"></div><span class="src">${r.n}</span></div>`).join('') || '<span class="src">—</span>'; };
+  async function load() {
+    const d = await App.api(`/api/company/${encodeURIComponent(ticker)}?hours=${hours}`);
+    $('#tk').textContent = d.ticker; $('#nm').textContent = d.name === d.ticker ? 'Detected via $cashtag mentions' : d.name;
+    $('#meta').innerHTML = `<span class="tag">${d.mentions} mentions</span>${d.press_releases ? `<span class="tag pr">📣 ${d.press_releases} press releases</span>` : ''}${d.mentions ? tonePill(d.tone) : ''}`;
+    const W = 720, Hh = 190, n = d.timeline.length, bw = W / n, max = Math.max(1, ...d.timeline.map(b => b.n));
+    $('#chart').setAttribute('viewBox', `0 0 ${W} ${Hh}`);
+    $('#chart').innerHTML = d.timeline.map((b, i) => { const h = b.n / max * (Hh - 12), hp = b.pr / max * (Hh - 12);
+      return `<g data-tip="${esc(App.clock(b.t))} — ${b.n} mention${b.n === 1 ? '' : 's'}${b.pr ? ' (' + b.pr + ' PR)' : ''}">
+      <rect class="b" style="--i:${i}" x="${i * bw + 2}" y="${Hh - h}" width="${bw - 4}" height="${Math.max(h, b.n ? 3 : 0)}" rx="3"/>
+      ${b.pr ? `<rect class="b p" style="--i:${i}" x="${i * bw + 2}" y="${Hh - hp}" width="${bw - 4}" height="${hp}" rx="3"/>` : ''}
+      <rect x="${i * bw}" y="0" width="${bw}" height="${Hh}" fill="transparent"/></g>`; }).join('');
+    $('#axis').innerHTML = `<span>${App.clock(d.timeline[0].t)}</span><span>now</span>`;
+    $('#srcs').innerHTML = bars(d.by_source); $('#regs').innerHTML = bars(d.by_region);
+    $('#rel').innerHTML = d.related.map(r => `<a class="tag" style="font-size:14px;padding:5px 12px" href="/company/${encodeURIComponent(r.ticker)}" data-tip="${esc(r.name)} — together in ${r.n} articles">${esc(r.ticker)}</a>`).join('') || '<span class="src">No co-mentions yet</span>';
+    $('#arts').innerHTML = d.articles.map((x, i) => `<a class="card hover fcard rise" style="--i:${Math.min(i, 10)}" href="${safeUrl(x.url)}" target="_blank" rel="noopener">
+      <div>${srcBadge(x.source)}<span class="src">${esc(x.region)} · ${ago(x.published_at)}</span></div><div class="t" style="margin-top:8px">${esc(x.title)}</div>
+      <div class="tags" style="margin:8px 0 0">${x.kind === 'press_release' ? '<span class="tag pr">📣 Press release</span>' : ''}${tonePill(x.tone)}</div></a>`).join('')
+      || '<div class="card empty"><b>🤷</b>No coverage for this ticker in the selected window.</div>';
+  }
+  load();
+});
+</script></body></html>

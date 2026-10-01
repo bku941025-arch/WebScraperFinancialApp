@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend — Scrape Status</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body><div class="wrap">
+  <section class="hero"><h1>Scrape <span class="grad">schedule &amp; health</span></h1>
+  <p id="blurb">Feeds are collected three times per trading day: shortly after the open, at mid-session, and shortly before the close.</p>
+  <div class="controls"><button class="btn" id="run">▶ Run now</button><span class="src" id="total"></span></div></section>
+  <h2 class="sec">Upcoming runs</h2><div class="sched" id="sched"></div>
+  <h2 class="sec">Source health</h2><div class="srcs" id="srcs" style="margin-bottom:26px"></div>
+  <h2 class="sec">Run history</h2><div class="card" style="margin-bottom:40px;overflow-x:auto"><table><thead><tr><th>When</th><th>Trigger</th><th>New articles</th><th>Feeds OK</th><th>Failed</th></tr></thead><tbody id="runs"></tbody></table></div>
+</div>
+<script>
+App.ready('/status', () => {
+  const {$, esc, ago, clock} = App; let timers = [];
+  async function load() {
+    const d = await App.api('/api/status'); timers.forEach(clearInterval); timers = [];
+    $('#blurb').textContent = 'Feeds are collected three times per trading day per market — just after the open, at mid-session, and shortly before the close. Configured: ' +
+      d.markets.map(m => `${m.name} (${m.open}–${m.close} ${m.tz.split('/')[1].replace('_', ' ')})`).join(', ') + '.';
+    $('#total').textContent = d.total_articles.toLocaleString() + ' articles stored';
+    $('#sched').innerHTML = d.schedule.map((s, i) => `<div class="card rise" style="--i:${i}"><div class="src">${esc(s.phase.toUpperCase())} · ${esc(s.market)}</div>
+      <div class="cd" data-at="${s.at}">–</div><div class="src">${esc(clock(s.at))}</div></div>`).join('');
+    document.querySelectorAll('.cd').forEach(el => timers.push(App.countdown(el, +el.dataset.at)));
+    $('#srcs').innerHTML = d.sources.map((s, i) => { const cls = s.ok == null ? 'idle' : s.ok ? '' : 'bad';
+      return `<div class="card rise" style="--i:${Math.min(i, 14)}"><div><span class="dot ${cls}"></span><b>${esc(s.name)}</b></div>
+      <div class="src">${esc(s.region)} · ${s.kind === 'press_release' ? '📣 press releases' : 'news'}</div>
+      <div class="src">${s.ok == null ? 'Not fetched yet' : s.ok ? `OK ${ago(s.last_ok)} · ${s.last_new} new` : 'Failed ' + ago(s.last_attempt) + (s.last_ok ? ' · last OK ' + ago(s.last_ok) : '')}</div></div>`; }).join('');
+    $('#runs').innerHTML = d.runs.map(r => `<tr><td>${esc(clock(r.finished_at))}</td><td><span class="tag">${esc(r.trigger)}</span></td><td>${r.new_articles}</td><td>${r.feeds_ok}</td>
+      <td>${r.feeds_failed ? `<span class="tag down">${r.feeds_failed}</span>` : '0'}</td></tr>`).join('') || '<tr><td colspan="5" class="src">No runs yet.</td></tr>';
+  }
+  $('#run').onclick = async () => { const b = $('#run'); b.disabled = true; b.textContent = 'Scraping…';
+    try { const r = await App.api('/api/refresh', {method: 'POST'}); const n = Object.values(r).reduce((a, v) => a + Math.max(v, 0), 0);
+      App.toast(`Done — ${n} new articles`); await load(); } catch { App.toast('Scrape failed'); }
+    b.disabled = false; b.textContent = '▶ Run now'; };
+  load();
+});
+</script></body></html>
