@@ -6,6 +6,7 @@
   <p id="blurb">Feeds are collected three times per trading day: shortly after the open, at mid-session, and shortly before the close.</p>
   <div class="controls"><button class="btn" id="run">▶ Run now</button><span class="src" id="total"></span></div></section>
   <h2 class="sec">Upcoming runs</h2><div class="sched" id="sched"></div>
+  <h2 class="sec">Datasets</h2><div class="srcs" id="sets" style="margin-bottom:26px"></div>
   <h2 class="sec">Source health</h2><div class="srcs" id="srcs" style="margin-bottom:26px"></div>
   <h2 class="sec">Run history</h2><div class="card" style="margin-bottom:40px;overflow-x:auto"><table><thead><tr><th>When</th><th>Trigger</th><th>New articles</th><th>Feeds OK</th><th>Failed</th></tr></thead><tbody id="runs"></tbody></table></div>
 </div>
@@ -20,9 +21,13 @@ App.ready('/status', () => {
     $('#sched').innerHTML = d.schedule.map((s, i) => `<div class="card rise" style="--i:${i}"><div class="src">${esc(s.phase.toUpperCase())} · ${esc(s.market)}</div>
       <div class="cd" data-at="${s.at}">–</div><div class="src">${esc(clock(s.at))}</div></div>`).join('');
     document.querySelectorAll('.cd').forEach(el => timers.push(App.countdown(el, +el.dataset.at)));
+    const ds = d.datasets, age = a => a == null ? 'never' : a < 3600 ? (a / 60 | 0) + 'm ago' : a < 86400 ? (a / 3600 | 0) + 'h ago' : (a / 86400 | 0) + 'd ago';
+    $('#sets').innerHTML = [['🏷️ Ticker universe (SEC)', ds.universe.count ? ds.universe.count.toLocaleString() + ' companies · updated ' + age(ds.universe.age) : 'Not loaded yet — loads on the next scrape'],
+      ['📅 Earnings calendar', ds.earnings.provider ? `${ds.earnings.upcoming} upcoming · ${ds.earnings.provider} · updated ${age(ds.earnings.age)}` : 'Not loaded yet — loads on the next scrape'],
+      ['📈 Prices & charts', ds.prices]].map(([t, v], i) => `<div class="card rise" style="--i:${i}"><b>${t}</b><div class="src">${esc(v)}</div></div>`).join('');
     $('#srcs').innerHTML = d.sources.map((s, i) => { const cls = s.ok == null ? 'idle' : s.ok ? '' : 'bad';
       return `<div class="card rise" style="--i:${Math.min(i, 14)}"><div><span class="dot ${cls}"></span><b>${esc(s.name)}</b></div>
-      <div class="src">${esc(s.region)} · ${s.kind === 'press_release' ? '📣 press releases' : 'news'}</div>
+      <div class="src">${esc(s.region)} · ${s.kind === 'press_release' ? '📣 press releases' : s.kind === 'filing' ? '🏛 SEC filings' : 'news'}</div>
       <div class="src">${s.ok == null ? 'Not fetched yet' : s.ok ? `OK ${ago(s.last_ok)} · ${s.last_new} new` : 'Failed ' + ago(s.last_attempt) + (s.last_ok ? ' · last OK ' + ago(s.last_ok) : '')}</div></div>`; }).join('');
     $('#runs').innerHTML = d.runs.map(r => `<tr><td>${esc(clock(r.finished_at))}</td><td><span class="tag">${esc(r.trigger)}</span></td><td>${r.new_articles}</td><td>${r.feeds_ok}</td>
       <td>${r.feeds_failed ? `<span class="tag down">${r.feeds_failed}</span>` : '0'}</td></tr>`).join('') || '<tr><td colspan="5" class="src">No runs yet.</td></tr>';

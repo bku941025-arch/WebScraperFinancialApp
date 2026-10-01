@@ -1,14 +1,18 @@
 """Seed a *synthetic* database so the UI can be explored without live feeds.
 
     FINTREND_DB=demo.db python -m app.demo
-    FINTREND_DB=demo.db DISABLE_SCHEDULER=1 python -m app.main   # or uvicorn app.main:app
+    FINTREND_DB=demo.db FINTREND_DEMO=1 DISABLE_SCHEDULER=1 python -m uvicorn app.main:app
+
+FINTREND_DEMO=1 also makes price charts synthetic (clearly labelled in the UI).
 
 Headlines are made up for demonstration only.
 """
 import random
 import time
+from datetime import timedelta
 
-from . import scraper
+from . import earnings, scraper, universe
+from . import db
 from .db import session
 from .sources import SOURCES
 
@@ -36,7 +40,7 @@ def main(seed: int = 7) -> None:
     items = []
     for i in range(520):
         t = rnd.choices(names, [HOT[n][1] for n in names])[0]
-        src = rnd.choice(SOURCES)
+        src = rnd.choice([x for x in SOURCES if x.fmt != "edgar"])
         # more mentions in recent hours, with a few "breaking" bursts
         age_h = min(71.9, rnd.expovariate(1 / 14)) if rnd.random() > 0.15 else rnd.uniform(0, 5)
         title = rnd.choice(PR if src.kind == "press_release" else NEWS).format(c=HOT[t][0])
@@ -46,7 +50,33 @@ def main(seed: int = 7) -> None:
                           summary=f"Demo article about {HOT[t][0]}. Synthetic data for UI preview.",
                           source=src.name, region=src.region, kind=src.kind,
                           published_at=now - age_h * 3600))
+    # SEC-style 8-K filings with item labels (tickers resolved directly)
+    codes = [("2.02", "Earnings results"), ("5.02", "Executive / director change"), ("1.01", "Material agreement"),
+             ("8.01", "Other events"), ("7.01", "Reg FD disclosure"), ("2.01", "Acquisition / disposal completed")]
+    for i in range(70):
+        t = rnd.choices(names, [HOT[n][1] for n in names])[0]
+        code, label = rnd.choice(codes)
+        items.append(dict(url=f"https://example.com/demo/8k/{i}", title=f"{HOT[t][0]} filed 8-K: {label}",
+                          summary=f"Items: {code} {label}", source="SEC EDGAR 8-K", region="US", kind="filing",
+                          published_at=now - rnd.uniform(0, 60) * 3600, tickers=[t]))
     scraper.store(items, now)
+    # demo ticker universe (powers search) + earnings calendar
+    extra = ["Palantir Technologies", "Snowflake Inc.", "Uber Technologies", "Airbnb, Inc.", "Shopify Inc.", "Salesforce, Inc.",
+             "Adobe Inc.", "Intel Corporation", "Qualcomm Incorporated", "Micron Technology", "Cisco Systems", "Costco Wholesale"]
+    tick = ["PLTR", "SNOW", "UBER", "ABNB", "SHOP", "CRM", "ADBE", "INTC", "QCOM", "MU", "CSCO", "COST"]
+    universe.store([dict(ticker=t, name=n, cik=1000 + i, rank=i) for i, (t, n) in enumerate(zip(tick, extra))]
+                   + [dict(ticker=t, name=HOT[t][0], cik=2000 + i, rank=20 + i) for i, t in enumerate(HOT) if "." not in t])
+    today = earnings.today_et()
+    rows, pool = [], list(HOT) + tick
+    for i, t in enumerate(pool):
+        d = today + timedelta(days=rnd.randint(0, 16))
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        rows.append(dict(ticker=t, date=d.isoformat(), name=HOT[t][0] if t in HOT else extra[tick.index(t)],
+                         time=rnd.choice(["bmo", "amc", "amc", ""]), eps_est=round(rnd.uniform(.2, 4.5), 2),
+                         fiscal=f"Q3 {today.year}", market_cap=rnd.uniform(5e9, 3e12)))
+    earnings.replace_window(rows, today.isoformat(), (today + timedelta(days=21)).isoformat(), "demo")
+    db.cache_put("earnings_meta", dict(provider="demo", rows=len(rows), failed_days=0))
     with session() as conn:
         for k, (label, n) in enumerate([("US open", 38), ("US midday", 21), ("US close", 17), ("manual", 9)]):
             fin = now - (k * 5.5 + 1) * 3600
@@ -56,7 +86,7 @@ def main(seed: int = 7) -> None:
             ok = j != 3
             conn.execute("INSERT OR REPLACE INTO source_health VALUES(?,?,?,?,?)",
                          (s.name, now - 3600, now - 3600 if ok else now - 86400, int(ok), rnd.randint(0, 14)))
-    print(f"seeded {len(items)} synthetic articles")
+    print(f"seeded {len(items)} synthetic articles, {len(rows)} earnings dates")
 
 
 if __name__ == "__main__":

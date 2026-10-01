@@ -26,7 +26,7 @@ COMPANIES: dict[str, tuple[str, list[str]]] = {
     "GS": ("Goldman Sachs", ["Goldman Sachs", "Goldman"]),
     "MS": ("Morgan Stanley", ["Morgan Stanley"]),
     "BAC": ("Bank of America", ["Bank of America"]),
-    "BRK.B": ("Berkshire Hathaway", ["Berkshire Hathaway", "Warren Buffett"]),
+    "BRK-B": ("Berkshire Hathaway", ["Berkshire Hathaway", "Warren Buffett"]),
     "V": ("Visa", ["Visa Inc"]),
     "WMT": ("Walmart", ["Walmart"]),
     "XOM": ("Exxon Mobil", ["Exxon"]),

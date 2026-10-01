@@ -6,11 +6,12 @@
 <div class="wrap">
   <section class="hero">
     <h1>What the world's markets are <span class="grad">talking about</span></h1>
-    <p>Companies, tickers and announcements ranked by how fast the news is moving — across US, European, Asian and global sources, plus first-party press releases.</p>
+    <p>Companies, tickers and announcements ranked by how fast the news is moving — across US, European, Asian and global sources, plus first-party press releases and SEC filings.</p>
     <div class="stats">
       <div class="stat"><div class="n" id="s-art">–</div><div class="l">articles in last 24h</div></div>
       <div class="stat"><div class="n" id="s-co">–</div><div class="l">companies mentioned</div></div>
       <div class="stat"><div class="n" id="s-pr">–</div><div class="l">press releases</div></div>
+      <div class="stat"><div class="n" id="s-fl">–</div><div class="l">SEC filings (8-K)</div></div>
       <div class="stat"><div class="n" style="font-size:22px;padding:5px 0" id="s-next">–</div><div class="l" id="s-next-l">next scheduled scrape</div></div>
     </div>
   </section>
@@ -23,6 +24,8 @@
     <main><h2 class="sec">Trending now</h2><div class="spot" id="spot"></div><div class="rows" id="rows"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></main>
     <aside>
       <h2 class="sec">🚀 Rising fast</h2><div class="card" id="rising"></div>
+      <h2 class="sec" style="margin-top:22px">📅 Upcoming earnings</h2><div class="card" id="earn"></div>
+      <a class="crumb" style="margin-top:8px" href="/earnings">Full earnings calendar →</a>
       <h2 class="sec" style="margin-top:22px">📣 Latest press releases</h2><div class="card" id="pr"></div>
       <a class="crumb" href="/feed">See all news &amp; releases →</a>
     </aside>
@@ -39,11 +42,12 @@ App.ready('/', () => {
       if (key === 'hours') App.store.set('hours', st.hours); chips(el, items, key); load(); }; };
   chips('#hours', HOURS, 'hours');
   App.api('/api/regions').then(r => chips('#regions', [['', 'All regions'], ...r.map(x => [x, x])], 'region'));
-  $('#q').oninput = e => { st.q = e.target.value.trim().toLowerCase(); render(); };
+  $('#q').oninput = e => { st.q = e.target.value.trim().toLowerCase(); render(); afterRender(); };
 
   const cardLink = t => `/company/${encodeURIComponent(t.ticker)}`;
   const tags = t => `<span class="tag">${t.mentions} mentions</span><span class="tag">${t.sources} sources</span>${
     t.press_releases ? `<span class="tag pr">📣 ${t.press_releases} PR</span>` : ''}${
+    t.filings ? `<span class="tag sec" data-tip="SEC 8-K filings">🏛 ${t.filings}</span>` : ''}${
     t.momentum > 0 ? `<span class="tag up" data-tip="More mentions in the last 6h than the 6h before">▲ +${t.momentum}</span>` :
     t.momentum < 0 ? `<span class="tag down" data-tip="Fewer mentions in the last 6h than the 6h before">▼ ${t.momentum}</span>` : ''}`;
 
@@ -63,26 +67,30 @@ App.ready('/', () => {
             <div class="bar" style="width:${t.score / max * 100}%;margin-top:6px"></div></div>
           <div class="spark-c">${spark(t.spark, {w: 120, h: 32})}</div>
           <div class="meta">${tags(t)}${tonePill(t.tone)}<span class="chev">›</span></div></div>
-        <div class="more"><div><div class="in"><ul>${t.headlines.map(h => `<li><a href="${safeUrl(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>
-          <div class="src">${esc(h.source)} · ${ago(h.published_at)}${h.kind === 'press_release' ? ' · 📣 press release' : ''}</div></li>`).join('')}</ul>
+        <div class="more"><div><div class="in"><div data-sp="${esc(t.ticker)}"></div><ul>${t.headlines.map(h => `<li><a href="${safeUrl(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>
+          <div class="src">${esc(h.source)} · ${ago(h.published_at)}${h.kind === 'press_release' ? ' · 📣 press release' : h.kind === 'filing' ? ' · 🏛 SEC filing' : ''}</div></li>`).join('')}</ul>
           <a class="tag" href="${cardLink(t)}" style="display:inline-block">Open ${esc(t.ticker)} deep-dive →</a></div></div></div></div>`).join('')
       || (list.length ? '' : '<div class="card empty"><b>🔍</b>Nothing matches yet. If this is a fresh install, the first scrape runs at startup — or open <a href="/status" style="color:var(--a1)">Scrape Status</a> and hit “Run now”.</div>');
   }
-  $('#rows').onclick = e => { const row = e.target.closest('.row'); if (!row || e.target.closest('a')) return;
-    const t = row.dataset.t; row.classList.toggle('open'); st.open.has(t) ? st.open.delete(t) : st.open.add(t); };
+  const initChart = row => { const host = row.querySelector('[data-sp]'); if (host && !host.dataset.on) { host.dataset.on = 1; App.stockPanel(host, row.dataset.t, {h: 230}); } };
+  const afterRender = () => document.querySelectorAll('#rows .row.open').forEach(initChart);
+  $('#rows').onclick = e => { const row = e.target.closest('.row'); if (!row || e.target.closest('a, .sp')) return;
+    const t = row.dataset.t; row.classList.toggle('open'); st.open.has(t) ? st.open.delete(t) : st.open.add(t); if (row.classList.contains('open')) initChart(row); };
 
   async function load() {
-    const [tr, pr, ov] = await Promise.all([
+    const [tr, pr, ov, er] = await Promise.all([
       App.api(`/api/trends?hours=${st.hours}&limit=30${st.region ? '&region=' + encodeURIComponent(st.region) : ''}`),
-      App.api('/api/feed?kind=press_release&limit=7&hours=72'), App.api('/api/overview')]);
-    st.data = tr; render();
+      App.api('/api/feed?kind=press_release&limit=7&hours=72'), App.api('/api/overview'), App.api('/api/earnings?days=10&top=6')]);
+    st.data = tr; render(); afterRender();
     $('#tape').innerHTML = tr.length ? App.tape(tr.slice(0, 14)) : '';
     $('#rising').innerHTML = tr.filter(t => t.momentum > 0).sort((a, b) => b.momentum - a.momentum).slice(0, 5).map(t => `
       <a class="item" href="${cardLink(t)}"><div style="display:flex;justify-content:space-between"><b>${esc(t.ticker)}</b>
       <span class="tag up">▲ +${t.momentum}</span></div><div class="src">${esc(t.name)}</div></a>`).join('') || '<div class="src">Nothing accelerating right now.</div>';
     $('#pr').innerHTML = pr.map(x => `<a class="item" href="${safeUrl(x.url)}" target="_blank" rel="noopener"><div class="t">${esc(x.title)}</div>
       <div class="src">${esc(x.source)} · ${ago(x.published_at)}${x.tickers.length ? ' · ' + x.tickers.slice(0, 3).map(esc).join(', ') : ''}</div></a>`).join('') || '<div class="src">No press releases yet.</div>';
-    App.countUp($('#s-art'), ov.articles_24h); App.countUp($('#s-co'), ov.companies_24h); App.countUp($('#s-pr'), ov.press_24h);
+    $('#earn').innerHTML = er.map(x => `<a class="upc" href="/company/${encodeURIComponent(x.ticker)}"><span><b>${esc(x.ticker)}</b> <span class="src">${esc(x.name || '')}</span></span>
+      <span class="tag ${x.trending ? 'pr' : ''}">${esc(App.shortDay(x.date))} · ${esc(x.time === 'bmo' ? 'BMO' : x.time === 'amc' ? 'AMC' : '—')}</span></a>`).join('') || '<div class="src">No earnings scheduled yet — the calendar fills in on the next scheduled scrape.</div>';
+    App.countUp($('#s-fl'), ov.filings_24h); App.countUp($('#s-art'), ov.articles_24h); App.countUp($('#s-co'), ov.companies_24h); App.countUp($('#s-pr'), ov.press_24h);
     if (ov.next[0]) { clearInterval(load.cd); load.cd = App.countdown($('#s-next'), ov.next[0].at); $('#s-next-l').textContent = 'until ' + ov.next[0].label + ' scrape'; }
   }
   load().catch(() => $('#rows').innerHTML = '<div class="card empty">Couldn’t reach the API.</div>');

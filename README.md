@@ -11,21 +11,36 @@ python -m app.scraper                       # one-off fetch from the CLI
 pytest
 ```
 
+## Data sources (all free, no key required)
+| Data | Source | Notes |
+|---|---|---|
+| News / press releases | RSS feeds (`app/sources.py`) | per-feed failures are skipped and shown on Status |
+| 8-K filings | SEC EDGAR "current events" Atom feed | **Set `SEC_USER_AGENT="YourApp you@example.com"`** — the SEC requires a contact in the User-Agent |
+| Ticker universe / search | SEC `company_tickers.json` | refreshed weekly; also maps filings (CIK) to tickers |
+| Earnings calendar | Nasdaq public calendar (unofficial) — or **Finnhub** if `FINNHUB_API_KEY` is set (free key, official) | refreshed on every scheduled scrape, next 21 days |
+| Prices & charts | Yahoo Finance chart endpoint (unofficial) | cached 3–30 min; stale copy served if a refresh fails |
+
+The Nasdaq and Yahoo endpoints are unofficial and can change or rate-limit. Anything unavailable degrades to an
+empty state rather than an error; the Status page shows what loaded.
+
 ### Try the UI without live feeds
 ```
 FINTREND_DB=demo.db python -m app.demo                                   # synthetic data
-FINTREND_DB=demo.db DISABLE_SCHEDULER=1 python -m uvicorn app.main:app
+FINTREND_DB=demo.db FINTREND_DEMO=1 DISABLE_SCHEDULER=1 python -m uvicorn app.main:app
 ```
 
 ## Pages
 | Path | What it shows |
 |---|---|
 | `/` | Dashboard: top-3 spotlight, ranked trends with sparklines, expandable headlines, rising-fast, latest press releases, ticker tape |
+| `/earnings` | Quarterly earnings calendar: grouped by day, before-open/after-close, EPS estimate, "trending" flag, day jump chips |
 | `/markets` | Trend "bubble cloud" + per-region breakdown |
-| `/feed` | Searchable news / press-release feed with region and time filters |
-| `/company/{ticker}` | Mentions-over-time chart, sources, regions, co-mentioned companies, coverage |
+| `/feed` | Searchable feed of news, press releases and SEC 8-K filings with region and time filters |
+| `/company/{ticker}` | Price chart (line/candles, 1D–1Y), stock summary, next earnings, mentions-over-time, sources, regions, related companies |
 | `/status` | Next scheduled runs (live countdown), per-source health, run history, "Run now" |
 
+Click any trending row on the dashboard to expand it into a price chart. The search box in the top bar (press `/`) finds
+any ticker or company and previews its price, ranges, volume, news count and next earnings; Enter opens the full page.
 Light/dark theme toggle (top right) remembers your choice.
 
 ## Schedule: 3 scrapes per trading day
@@ -54,5 +69,4 @@ Uses public RSS/Atom feeds rather than HTML scraping: stable, and respects site 
 Some feed URLs may change or require adjustments; failures are logged per-feed and skipped.
 
 ## Ideas for next steps
-Better sentiment, SEC EDGAR 8-K / exchange announcement feeds, full ticker universe
-(SEC `company_tickers.json`), price data overlay, alerts (email/Telegram) on spikes.
+Better sentiment, non-US exchange announcement feeds, news markers on price charts, alerts (email/Telegram) on spikes.

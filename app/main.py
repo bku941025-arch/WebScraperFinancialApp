@@ -5,11 +5,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db, scheduler, scraper, trends
+from . import db, earnings, quotes, scheduler, scraper, trends, universe
 from .sources import SOURCES
 
 MARKETS = scheduler.parse_markets(os.getenv("SCHEDULE_MARKETS", "US"))
@@ -77,6 +77,47 @@ def api_overview():
         return trends.overview(conn) | {"next": _schedule(1)}
 
 
+@app.get("/api/search")
+def api_search(q: str = Query("", max_length=60)):
+    with db.session() as conn:
+        return universe.search(conn, q)
+
+
+def _symbol(symbol: str) -> str:
+    if not quotes.SYMBOL_RE.match(symbol):
+        raise HTTPException(422, "invalid symbol")
+    return symbol.upper()
+
+
+@app.get("/api/stock/{symbol}/chart")
+async def api_stock_chart(symbol: str, range: str = Query("1M", pattern="^(1D|5D|1M|6M|1Y)$")):
+    return await quotes.get_chart(_symbol(symbol), range)
+
+
+@app.get("/api/stock/{symbol}/summary")
+async def api_stock_summary(symbol: str):
+    sym = _symbol(symbol)
+    chart = await quotes.get_chart(sym, "1Y")
+    quote = quotes.summarize(chart)
+    with db.session() as conn:
+        name = universe.names(conn, [sym])[sym]
+        mentions = conn.execute("SELECT COUNT(*) FROM mentions m JOIN articles a ON a.id = m.article_id "
+                                "WHERE m.ticker = ? AND a.published_at >= ?", (sym, time.time() - 86400)).fetchone()[0]
+        filing = conn.execute("SELECT a.title, a.url, a.published_at FROM mentions m JOIN articles a ON a.id = m.article_id "
+                              "WHERE m.ticker = ? AND a.kind = 'filing' ORDER BY a.published_at DESC LIMIT 1", (sym,)).fetchone()
+        nxt = earnings.next_for(conn, sym)
+    return dict(symbol=sym, name=name if name != sym else (quote or {}).get("name") or sym, quote=quote,
+                error=chart.get("error"), source=chart.get("source"), stale=chart.get("stale", False),
+                mentions_24h=mentions, latest_filing=dict(filing) if filing else None, next_earnings=nxt)
+
+
+@app.get("/api/earnings")
+def api_earnings(days: int = Query(14, ge=1, le=60), only_trending: bool = False, q: str | None = Query(None, max_length=40),
+                 top: int | None = Query(None, ge=1, le=100), limit: int = Query(300, ge=1, le=1000)):
+    with db.session() as conn:
+        return earnings.upcoming(conn, days, only_trending, q, top, limit)
+
+
 @app.get("/api/regions")
 def api_regions():
     return sorted({s.region for s in SOURCES})
@@ -92,7 +133,17 @@ def api_status():
                     **{k: health.get(s.name, {}).get(k) for k in ("last_attempt", "last_ok", "ok", "last_new")})
                for s in SOURCES]
     return dict(schedule=_schedule(6), markets=[dict(key=k, **_market(k)) for k in MARKETS],
-                runs=runs, sources=sources, total_articles=total, now=time.time())
+                runs=runs, sources=sources, total_articles=total, now=time.time(), datasets=_datasets())
+
+
+def _datasets() -> dict:
+    uni, uni_age = db.cache_get("universe")
+    ern, ern_age = db.cache_get("earnings_meta")
+    with db.session() as conn:
+        upcoming = conn.execute("SELECT COUNT(*) FROM earnings WHERE date >= ?", (earnings.today_et().isoformat(),)).fetchone()[0]
+    return dict(universe=dict(count=(uni or {}).get("count"), age=uni_age),
+                earnings=dict(provider=(ern or {}).get("provider"), upcoming=upcoming, age=ern_age),
+                prices="demo (synthetic)" if quotes.DEMO else "Yahoo Finance (unofficial)")
 
 
 def _market(key: str) -> dict:
@@ -107,7 +158,7 @@ async def api_refresh():
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/status": "status.html"}
+PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/earnings": "earnings.html", "/status": "status.html"}
 for _path, _file in PAGES.items():
     app.get(_path, include_in_schema=False)(lambda f=_file: FileResponse(STATIC / f))
 

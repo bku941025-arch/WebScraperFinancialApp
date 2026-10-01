@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FinTrend — News &amp; Releases</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<title>FinTrend — News &amp; Filings</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
 <body><div class="wrap">
-  <section class="hero"><h1>News &amp; <span class="grad">press releases</span></h1>
-  <p>Every article we've collected. Switch to press releases for first-party company announcements straight from the wires.</p></section>
+  <section class="hero"><h1>News, releases &amp; <span class="grad">SEC filings</span></h1>
+  <p>Every article we've collected. Press releases are first-party announcements from the wires; SEC filings are 8-K current reports straight from EDGAR.</p></section>
   <div class="controls"><div class="chips" id="kind"></div><div class="chips" id="regions"></div>
     <div class="chips" id="hours"></div><input class="search" id="q" placeholder="Search headlines…" autocomplete="off"></div>
   <div id="list" style="max-width:860px"></div>
@@ -13,7 +13,7 @@
 App.ready('/feed', () => {
   const {$, esc, ago, safeUrl, tonePill, srcBadge} = App;
   const st = {kind: 'press_release', region: '', hours: 72, q: '', limit: 30};
-  const sets = {kind: [['press_release', '📣 Press releases'], ['', 'All news']], hours: [[24, '24h'], [72, '3 days'], [168, '7 days']]};
+  const sets = {kind: [['press_release', '📣 Press releases'], ['filing', '🏛 SEC filings'], ['', 'Everything']], hours: [[24, '24h'], [72, '3 days'], [168, '7 days']]};
   const chips = (el, items, key) => { $(el).innerHTML = items.map(([v, l]) => `<button class="chip ${st[key] == v ? 'on' : ''}" data-v="${esc(v)}">${esc(l)}</button>`).join('');
     $(el).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; st[key] = key === 'hours' ? +b.dataset.v : b.dataset.v; st.limit = 30; chips(el, items, key); load(); }; };
   chips('#kind', sets.kind, 'kind'); chips('#hours', sets.hours, 'hours');
@@ -26,7 +26,7 @@ App.ready('/feed', () => {
     $('#list').innerHTML = rows.map((x, i) => `<a class="card hover fcard rise" style="--i:${Math.min(i, 12)}" href="${safeUrl(x.url)}" target="_blank" rel="noopener">
       <div>${srcBadge(x.source)}<span class="src">${esc(x.region)} · ${ago(x.published_at)}</span></div>
       <div class="t" style="margin-top:8px">${esc(x.title)}</div>${x.summary ? `<p>${esc(x.summary.slice(0, 200))}</p>` : ''}
-      <div class="tags" style="margin:0">${x.kind === 'press_release' ? '<span class="tag pr">📣 Press release</span>' : ''}${tonePill(x.tone)}
+      <div class="tags" style="margin:0">${x.kind === 'press_release' ? '<span class="tag pr">📣 Press release</span>' : x.kind === 'filing' ? '<span class="tag sec">🏛 SEC filing</span>' : ''}${tonePill(x.tone)}
       ${x.tickers.map(k => `<span class="tag" data-go="${esc(k)}">${esc(k)}</span>`).join('')}</div></a>`).join('')
       || '<div class="card empty"><b>📭</b>No items match these filters.</div>';
     $('#more').hidden = rows.length < st.limit;

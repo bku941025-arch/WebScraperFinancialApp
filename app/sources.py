@@ -1,6 +1,6 @@
 """Feed registry. Add or remove sources here; each is a public RSS/Atom feed.
 
-`kind` is "news" or "press_release" — press releases/announcements get a higher
+`kind` is "news", "press_release" or "filing" — press releases/announcements get a higher
 weight in trend scoring because they're first-party signals.
 `region` is a free-form label used for display and filtering.
 """
@@ -13,6 +13,7 @@ class Source:
     url: str
     region: str
     kind: str = "news"
+    fmt: str = "rss"  # "rss" (generic) or "edgar" (SEC current-filings Atom feed)
 
 
 SOURCES: list[Source] = [
@@ -35,4 +36,7 @@ SOURCES: list[Source] = [
     Source("PR Newswire", "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss", "Global", "press_release"),
     Source("Business Wire", "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpRWQ==", "Global", "press_release"),
     Source("GlobeNewswire", "https://www.globenewswire.com/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/feedTitle/GlobeNewswire%20-%20Mergers%20And%20Acquisitions", "Global", "press_release"),
+    # Official regulatory filings. SEC requires a descriptive User-Agent: set SEC_USER_AGENT.
+    Source("SEC EDGAR 8-K", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&company=&dateb=&owner=include&start=0&count=100&output=atom",
+           "US", "filing", "edgar"),
 ]

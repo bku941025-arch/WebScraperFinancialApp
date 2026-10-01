@@ -65,7 +65,7 @@ def test_api_and_pages(seeded):
     assert client.get("/api/trends?hours=24").json()[0]["ticker"]
     assert client.get("/api/company/nvda").json()["ticker"] == "NVDA"
     s = client.get("/api/status").json()
-    assert len(s["schedule"]) == 6 and len(s["sources"]) == 15 and s["runs"]
+    assert len(s["schedule"]) == 6 and len(s["sources"]) == 16 and s["runs"]
     assert client.get("/api/feed?hours=0").status_code == 422
 
 

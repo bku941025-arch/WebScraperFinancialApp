@@ -33,6 +33,31 @@ CREATE TABLE IF NOT EXISTS runs (
     feeds_ok INTEGER NOT NULL,
     feeds_failed INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS companies (   -- ticker universe (SEC company_tickers.json)
+    ticker TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    cik INTEGER,
+    rank INTEGER NOT NULL           -- file order: larger companies first
+);
+CREATE INDEX IF NOT EXISTS idx_companies_cik ON companies(cik);
+CREATE TABLE IF NOT EXISTS earnings (
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,             -- YYYY-MM-DD
+    time TEXT NOT NULL DEFAULT '',  -- bmo | amc | dmh | ''
+    name TEXT,
+    eps_est REAL,
+    fiscal TEXT,
+    market_cap REAL,
+    source TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (ticker, date)
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings(date);
+CREATE TABLE IF NOT EXISTS cache (       -- small key/value store for quotes + dataset metadata
+    key TEXT PRIMARY KEY,
+    fetched_at REAL NOT NULL,
+    payload TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS source_health (
     source TEXT PRIMARY KEY,
     last_attempt REAL NOT NULL,
@@ -59,3 +84,21 @@ def session(path: Path | str | None = None):
         conn.commit()
     finally:
         conn.close()
+
+
+def cache_get(key: str) -> tuple[dict | None, float | None]:
+    """Returns (payload, age_seconds) or (None, None)."""
+    import json
+    import time
+    with session() as conn:
+        r = conn.execute("SELECT fetched_at, payload FROM cache WHERE key = ?", (key,)).fetchone()
+    return (json.loads(r["payload"]), time.time() - r["fetched_at"]) if r else (None, None)
+
+
+def cache_put(key: str, payload: dict) -> None:
+    import json
+    import time
+    with session() as conn:
+        conn.execute("INSERT INTO cache(key,fetched_at,payload) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE "
+                     "SET fetched_at=excluded.fetched_at, payload=excluded.payload",
+                     (key, time.time(), json.dumps(payload)))

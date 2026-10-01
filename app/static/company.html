@@ -5,6 +5,8 @@
   <a class="crumb" href="/">← Dashboard</a>
   <section class="hero" style="padding-top:14px"><h1><span class="grad" id="tk">…</span></h1><p id="nm"></p>
     <div class="tags" id="meta" style="margin-top:14px"></div></section>
+  <div class="split"><div class="card"><h2 class="sec" style="margin-top:0">Price</h2><div id="price"></div></div>
+    <div class="card" id="summary"><div class="sk-chart"></div></div></div>
   <div class="controls"><div class="chips" id="hours"></div></div>
   <h2 class="sec">Mentions over time <span class="src" style="text-transform:none;letter-spacing:0">(orange = press releases)</span></h2>
   <div class="card" style="margin-bottom:18px"><svg class="chart" id="chart" preserveAspectRatio="none"></svg><div class="src" id="axis" style="display:flex;justify-content:space-between"></div></div>
@@ -19,6 +21,8 @@ App.ready('', () => {
   const {$, esc, ago, safeUrl, srcBadge, tonePill} = App;
   const ticker = decodeURIComponent(location.pathname.split('/').pop()).toUpperCase(); let hours = 72;
   document.title = 'FinTrend — ' + ticker;
+  App.stockPanel($('#price'), ticker, {h: 270});
+  App.stockSummary(ticker).then(d => $('#summary').innerHTML = App.summaryHTML(d)).catch(() => $('#summary').innerHTML = '<div class="src">Summary unavailable.</div>');
   const H = [[24, '24h'], [72, '3 days'], [168, '7 days']];
   const paint = () => { $('#hours').innerHTML = H.map(([v, l]) => `<button class="chip ${v === hours ? 'on' : ''}" data-v="${v}">${l}</button>`).join(''); };
   $('#hours').onclick = e => { const b = e.target.closest('.chip'); if (b) { hours = +b.dataset.v; paint(); load(); } }; paint();
@@ -28,7 +32,7 @@ App.ready('', () => {
   async function load() {
     const d = await App.api(`/api/company/${encodeURIComponent(ticker)}?hours=${hours}`);
     $('#tk').textContent = d.ticker; $('#nm').textContent = d.name === d.ticker ? 'Detected via $cashtag mentions' : d.name;
-    $('#meta').innerHTML = `<span class="tag">${d.mentions} mentions</span>${d.press_releases ? `<span class="tag pr">📣 ${d.press_releases} press releases</span>` : ''}${d.mentions ? tonePill(d.tone) : ''}`;
+    $('#meta').innerHTML = `<span class="tag">${d.mentions} mentions</span>${d.press_releases ? `<span class="tag pr">📣 ${d.press_releases} press releases</span>` : ''}${d.next_earnings ? `<span class="tag pr">📅 Earnings ${esc(App.shortDay(d.next_earnings.date))} · ${esc(d.next_earnings.time_label)}</span>` : ''}${d.mentions ? tonePill(d.tone) : ''}`;
     const W = 720, Hh = 190, n = d.timeline.length, bw = W / n, max = Math.max(1, ...d.timeline.map(b => b.n));
     $('#chart').setAttribute('viewBox', `0 0 ${W} ${Hh}`);
     $('#chart').innerHTML = d.timeline.map((b, i) => { const h = b.n / max * (Hh - 12), hp = b.pr / max * (Hh - 12);
@@ -41,7 +45,7 @@ App.ready('', () => {
     $('#rel').innerHTML = d.related.map(r => `<a class="tag" style="font-size:14px;padding:5px 12px" href="/company/${encodeURIComponent(r.ticker)}" data-tip="${esc(r.name)} — together in ${r.n} articles">${esc(r.ticker)}</a>`).join('') || '<span class="src">No co-mentions yet</span>';
     $('#arts').innerHTML = d.articles.map((x, i) => `<a class="card hover fcard rise" style="--i:${Math.min(i, 10)}" href="${safeUrl(x.url)}" target="_blank" rel="noopener">
       <div>${srcBadge(x.source)}<span class="src">${esc(x.region)} · ${ago(x.published_at)}</span></div><div class="t" style="margin-top:8px">${esc(x.title)}</div>
-      <div class="tags" style="margin:8px 0 0">${x.kind === 'press_release' ? '<span class="tag pr">📣 Press release</span>' : ''}${tonePill(x.tone)}</div></a>`).join('')
+      <div class="tags" style="margin:8px 0 0">${x.kind === 'press_release' ? '<span class="tag pr">📣 Press release</span>' : x.kind === 'filing' ? '<span class="tag sec">🏛 SEC filing</span>' : ''}${tonePill(x.tone)}</div></a>`).join('')
       || '<div class="card empty"><b>🤷</b>No coverage for this ticker in the selected window.</div>';
   }
   load();

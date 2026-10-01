@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend — Earnings Calendar</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body><div class="wrap">
+  <section class="hero"><h1>Earnings <span class="grad">calendar</span></h1>
+  <p>Upcoming quarterly earnings reports. Companies already in the news are flagged — those are the ones most likely to move.</p></section>
+  <div class="controls"><div class="chips" id="days"></div><div class="chips" id="only"></div>
+    <input class="search" id="q" placeholder="Filter by ticker or company…" autocomplete="off"></div>
+  <div class="days" id="strip"></div>
+  <div id="list"></div>
+</div>
+<script>
+App.ready('/earnings', () => {
+  const {$, esc} = App; const st = {days: 14, only: '', q: ''};
+  const chips = (el, items, key) => { $(el).innerHTML = items.map(([v, l]) => `<button class="chip ${st[key] == v ? 'on' : ''}" data-v="${esc(v)}">${esc(l)}</button>`).join('');
+    $(el).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; st[key] = key === 'days' ? +b.dataset.v : b.dataset.v; chips(el, items, key); load(); }; };
+  chips('#days', [[7, 'Next 7 days'], [14, '14 days'], [30, '30 days']], 'days');
+  chips('#only', [['', 'All companies'], ['1', '🔥 Trending only']], 'only');
+  let t; $('#q').oninput = e => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); load(); }, 250); };
+  const TIME = {bmo: '☀️ Before open', amc: '🌙 After close', dmh: '🕛 During market'};
+  async function load() {
+    const p = new URLSearchParams({days: st.days}); if (st.only) p.set('only_trending', 'true'); if (st.q) p.set('q', st.q);
+    const rows = await App.api('/api/earnings?' + p), by = {};
+    rows.forEach(r => (by[r.date] ||= []).push(r));
+    const dates = Object.keys(by).sort();
+    $('#strip').innerHTML = dates.map(d => `<button class="chip" data-d="${d}">${esc(App.shortDay(d))} · ${by[d].length}</button>`).join('');
+    $('#strip').onclick = e => { const b = e.target.closest('.chip'); if (b) document.getElementById('d' + b.dataset.d)?.scrollIntoView({behavior: 'smooth', block: 'start'}); };
+    $('#list').innerHTML = dates.map(d => `<div class="day-h" id="d${d}"><h3>${esc(App.dayLabel(d))}</h3><span class="src">${by[d].length} report${by[d].length === 1 ? '' : 's'}</span></div>
+      <div class="egrid">${by[d].map((r, i) => `<a class="card hover ecard rise ${r.trending ? 'hot' : ''}" style="--i:${Math.min(i, 10)}" href="/company/${encodeURIComponent(r.ticker)}">
+        <div class="top"><span class="tk" style="font-size:19px">${esc(r.ticker)}</span><span class="src">${r.market_cap ? '$' + App.compact(r.market_cap) : ''}</span></div>
+        <div class="nm">${esc(r.name || '')}</div>
+        <div class="ew"><span class="tag">${TIME[r.time] || '⏱ Time TBA'}</span>${r.fiscal ? `<span class="tag">${esc(r.fiscal)}</span>` : ''}${r.eps_est != null ? `<span class="tag">EPS est. ${r.eps_est < 0 ? '-' : ''}$${Math.abs(r.eps_est).toFixed(2)}</span>` : ''}
+        ${r.trending ? `<span class="tag pr">🔥 ${r.mentions} mentions</span>` : ''}</div></a>`).join('')}</div>`).join('')
+      || '<div class="card empty"><b>📅</b>No earnings found. The calendar loads during scheduled scrapes (Nasdaq public calendar; set <code>FINNHUB_API_KEY</code> to use Finnhub instead). Check the Status page.</div>';
+  }
+  load();
+});
+</script></body></html>

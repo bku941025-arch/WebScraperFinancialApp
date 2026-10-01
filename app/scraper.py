@@ -8,6 +8,7 @@ import time
 import feedparser
 import httpx
 
+from . import earnings, edgar, universe
 from .db import session
 from .entities import extract_entities
 from .sources import SOURCES, Source
@@ -17,8 +18,12 @@ UA = "Mozilla/5.0 (compatible; FinTrendBot/0.1; +personal research use)"
 TAG_RE = re.compile(r"<[^>]+>")
 
 
-def parse_feed(source: Source, content: bytes, now: float | None = None) -> list[dict]:
+def parse_feed(source: Source, content: bytes, now: float | None = None,
+               cikmap: dict[int, str] | None = None) -> list[dict]:
     now = now or time.time()
+    if source.fmt == "edgar":
+        return [dict(i, source=source.name, region=source.region, kind=source.kind)
+                for i in edgar.parse_edgar(content, cikmap or {}, now)]
     parsed = feedparser.parse(content)
     items = []
     for e in parsed.entries:
@@ -42,17 +47,17 @@ def store(items: list[dict], now: float | None = None) -> int:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO articles(url,title,summary,source,region,kind,published_at,fetched_at)"
                 " VALUES(:url,:title,:summary,:source,:region,:kind,:published_at,:fetched_at)",
-                {**it, "fetched_at": now})
+                {k: it[k] for k in ("url", "title", "summary", "source", "region", "kind", "published_at")} | {"fetched_at": now})
             if cur.rowcount:
                 new += 1
-                for t in extract_entities(f"{it['title']}. {it['summary']}"):
+                for t in (it.get("tickers") or extract_entities(f"{it['title']}. {it['summary']}")):
                     conn.execute("INSERT OR IGNORE INTO mentions VALUES(?,?)", (cur.lastrowid, t))
     return new
 
 
 async def _fetch(client: httpx.AsyncClient, src: Source) -> tuple[Source, bytes | None]:
     try:
-        r = await client.get(src.url)
+        r = await client.get(src.url, headers={"User-Agent": universe.SEC_UA} if src.fmt == "edgar" else None)
         r.raise_for_status()
         return src, r.content
     except Exception as exc:  # one dead feed must not break the run
@@ -80,10 +85,20 @@ async def scrape_all(trigger: str = "manual") -> dict[str, int]:
     """Returns {source name: new article count} (-1 if the feed failed)."""
     started = time.time()
     async with httpx.AsyncClient(headers={"User-Agent": UA}, timeout=15, follow_redirects=True) as client:
+        try:
+            await universe.refresh(client)  # needed to map EDGAR CIKs -> tickers (weekly)
+        except Exception as exc:
+            log.warning("ticker universe refresh failed: %s", exc)
+        with session() as conn:
+            cikmap = universe.cik_map(conn)
         results = await asyncio.gather(*(_fetch(client, s) for s in SOURCES))
+        try:
+            await earnings.refresh(client)
+        except Exception as exc:
+            log.warning("earnings calendar refresh failed: %s", exc)
     report = {}
     for src, content in results:
-        report[src.name] = -1 if content is None else store(parse_feed(src, content))
+        report[src.name] = -1 if content is None else store(parse_feed(src, content, cikmap=cikmap))
     record_run(trigger, started, report)
     return report
 
