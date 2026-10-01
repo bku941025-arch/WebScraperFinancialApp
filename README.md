@@ -44,26 +44,32 @@ Click any trending row on the dashboard to expand it into a price chart. The sea
 any ticker or company and previews its price, ranges, volume, news count and next earnings; Enter opens the full page.
 Light/dark theme toggle (top right) remembers your choice.
 
-## AI assistant (`/chat`)
-Ask things like "what looks bullish right now?", "give me a full read on $NVDA", "compare $AAPL and $MSFT" or "who reports
-earnings this week?". It runs on the Claude API from the **server** (your key never reaches the browser) and answers using tools
-over this app's data: trending companies, price action + technicals (returns, 50/200-day averages, RSI, volatility), company
-news and 8-K filings, keyword search, the earnings calendar, and a market overview. Answers stream in with tool-activity chips,
-Markdown tables, and clickable `$TICKER` links.
-```
-export ANTHROPIC_API_KEY="sk-ant-..."        # required for real answers
-export FINTREND_MODEL=claude-sonnet-5-5      # optional; default claude-opus-5-5 (Sonnet is cheaper/faster)
-```
-- **Web search (opt-in, off by default):** set `FINTREND_WEB_SEARCH=1` on the server and a **🌐 Web** toggle appears in the chat
-  composer. When it's on for a question, the assistant may use Anthropic's server-side web search for things the app's feeds don't
-  cover (breaking news, announcements, macro context) and shows a **Sources** row of the outlets it cited. It still uses the app's
-  own tools for prices, trends and earnings. Each question is capped at `FINTREND_WEB_MAX_USES` searches (default 4); searches are
-  billed per use on top of tokens, so check Anthropic's current pricing. Web text is treated as untrusted.
-- It gives analysis and views grounded in data, framed as information rather than personalised advice, and says when data is thin.
-- Safeguards: tool results are treated as untrusted text, per-IP rate limit (20 questions / 10 min), a cap on tool rounds
-  per question, and conversation history lives only in your browser (localStorage; "New chat" clears it).
-- Each question uses API credits (a few tool calls + a streamed answer). Without a key the page shows setup instructions; with
-  `FINTREND_DEMO=1` and no key it uses a clearly-labelled scripted responder over the demo data so you can try the UI offline.
+## Assistant (`/chat`) — works with no AI and no key
+Ask things like "what looks bullish right now?", "give me a full read on $NVDA", "compare $AAPL and $MSFT", "who reports
+earnings this week?" or "what is RSI?". Answers stream in with tool-activity chips, Markdown tables and clickable `$TICKER`
+links. Three interchangeable engines share the same tools (trending companies, price action + technicals, company news and
+8-K filings, keyword search, earnings calendar, market overview) and the same UI — pick one with `FINTREND_CHAT`:
+
+| `FINTREND_CHAT` | Engine | Cost | Best for |
+|---|---|---|---|
+| `rules` (default) | **Built-in, no AI.** Matches your question to a fixed set of intents (what's trending/bullish/bearish by region and window, a company read, comparisons, earnings, filings, news, market overview, a *"should I buy…?"* signal scorecard, ~20 glossary terms) and writes the answer from templates over live data | Free, instant, offline | Everyday questions; zero setup |
+| `ollama` | A **local open-source model** via [Ollama](https://ollama.com) with tool calling. `ollama pull llama3.1`, then set `FINTREND_OLLAMA_MODEL` (default `llama3.1`) and optionally `OLLAMA_HOST` (default `http://localhost:11434`) | Free per question; needs a machine with roughly 8 GB+ free RAM | Free-form questions, nothing leaves your computer |
+| `claude` | The **Claude API** (`ANTHROPIC_API_KEY`; `FINTREND_MODEL`, default `claude-opus-5-5`, or `claude-sonnet-5-5` for cheaper/faster) | API credits | Best answers; optional web search (below) |
+
+If `FINTREND_CHAT` is unset it uses Claude when an Anthropic key is present, otherwise the built-in assistant. If the chosen engine
+isn't usable (Ollama not running or model missing, no key), the answer falls back to the built-in assistant and the page shows why.
+The badge next to the title shows which engine is active.
+
+- **Built-in assistant limits:** it only understands the question types above (it says so, and lists them, when it doesn't);
+  it never invents figures — everything comes from the tools or the fixed glossary. The "should I buy…?" scorecard counts
+  simple signals (price vs 50/200-day averages, 3-month return, RSI, distance from the 52-week high, news tone) — it is a
+  summary of data, not advice. Small local models are weaker than Claude at analysis and occasionally misuse tools.
+- **Claude web search (opt-in, off by default):** set `FINTREND_WEB_SEARCH=1` and a **🌐 Web** toggle appears in the composer.
+  When on for a question, Claude may use server-side web search for things the feeds don't cover and the answer shows a **Sources**
+  row. Capped at `FINTREND_WEB_MAX_USES` searches (default 4); searches are billed per use on top of tokens. Web text is untrusted.
+- **Safeguards (all engines):** tool results are treated as untrusted text, a per-IP rate limit (20 questions / 10 min), a cap on
+  tool rounds per question, any API key stays on the server, and chat history lives only in your browser (localStorage; "New chat" clears it).
+- **Claude only:** requests use `claude-opus-5-5`'s recommended settings (medium effort, server-side refusal fallback).
 
 ## Schedule: 3 scrapes per trading day
 Instead of constant polling, feeds are collected **just after the open (+5 min), at mid-session,

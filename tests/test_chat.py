@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import chat, chat_tools, db, demo, quotes
+from app import chat, chat_ollama, chat_tools, db, demo, quotes
 
 
 @pytest.fixture()
@@ -165,35 +165,62 @@ def test_history_cleaning_and_rate_limit():
     assert [rl.allow("a", 100), rl.allow("a", 101), rl.allow("a", 102), rl.allow("b", 102), rl.allow("a", 161)] == [True, True, False, True, True]
 
 
-def test_api_endpoint_demo_mode_end_to_end(seeded, monkeypatch):
-    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "FINTREND_CHAT_ENABLED"):
+def _clear_env(monkeypatch):
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "FINTREND_CHAT_ENABLED", "FINTREND_CHAT", "FINTREND_WEB_SEARCH"):
         monkeypatch.delenv(k, raising=False)
+
+
+def _sse(text):
+    return [json.loads(l[6:]) for l in text.split("\n\n") if l.startswith("data: ")]
+
+
+def test_api_defaults_to_builtin_assistant_without_any_key(seeded, monkeypatch):
+    _clear_env(monkeypatch)
     from app.main import app
     c = TestClient(app)
     assert c.get("/chat").status_code == 200
-    assert c.get("/api/chat/status").json() == dict(configured=True, demo=True, model="demo (scripted)", web_search=False)
+    st = c.get("/api/chat/status").json()
+    assert st == dict(provider="rules", model="Built-in assistant", requested="rules", reason=None, web_search=False)
     r = c.post("/api/chat", json={"messages": [{"role": "user", "content": "What is trending and bullish right now?"}]})
     assert r.headers["content-type"].startswith("text/event-stream")
-    ev = [json.loads(l[6:]) for l in r.text.split("\n\n") if l.startswith("data: ")]
+    ev = _sse(r.text)
     body = "".join(e.get("text", "") for e in ev if e["type"] == "delta")
     assert [e["type"] for e in ev if e["type"] != "delta"] == ["tool_start", "tool_done", "done"]
-    assert "Demo mode" in body and "| Ticker |" in body and "$" in body
+    assert "| Ticker |" in body and "$" in body
     assert c.post("/api/chat", json={"messages": [{"role": "robot", "content": "x"}]}).status_code == 422
     assert c.post("/api/chat", json={"messages": []}).status_code == 422
     chat.limiter.hits.clear()
 
 
-def test_endpoint_requires_configuration(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    monkeypatch.setattr(quotes, "DEMO", False)
-    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "FINTREND_CHAT_ENABLED"):
-        monkeypatch.delenv(k, raising=False)
-    from app.main import app
-    c = TestClient(app)
-    assert c.get("/api/chat/status").json()["configured"] is False
-    assert c.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}).status_code == 503
+def test_provider_resolution(monkeypatch):
+    _clear_env(monkeypatch)
+    r = run(chat.resolve())
+    assert (r.provider, r.reason) == ("rules", None)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    assert c.get("/api/chat/status").json() == dict(configured=True, demo=False, model="claude-opus-5-5", web_search=False)
+    assert run(chat.resolve()).provider == "claude"                       # key present -> Claude unless told otherwise
+    monkeypatch.setenv("FINTREND_CHAT", "rules")
+    assert run(chat.resolve()).provider == "rules"                        # explicit choice wins
+    monkeypatch.setenv("FINTREND_CHAT", "claude"); monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert run(chat.resolve()).provider == "claude"                       # explicit: may use an `ant auth login` profile
+    monkeypatch.delenv("FINTREND_CHAT")
+    monkeypatch.setenv("FINTREND_WEB_SEARCH", "1")
+    assert run(chat.resolve()).web is False                               # web search is Claude-only
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    assert run(chat.resolve()).web is True
+
+
+def test_unreachable_ollama_falls_back_to_rules_with_notice(seeded, monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("FINTREND_CHAT", "ollama")
+    monkeypatch.setattr(chat_ollama, "HOST", "http://127.0.0.1:1")      # nothing listens here
+    chat_ollama._cache["at"] = 0
+    r = run(chat.resolve())
+    assert r.provider == "rules" and r.requested == "ollama" and "Couldn’t reach Ollama" in r.reason
+    from app.main import app
+    ev = _sse(TestClient(app).post("/api/chat", json={"messages": [{"role": "user", "content": "what is RSI?"}]}).text)
+    assert ev[0]["type"] == "notice" and "Using the built-in assistant" in ev[0]["text"]
+    assert "Relative Strength" in "".join(e.get("text", "") for e in ev if e["type"] == "delta")
+    chat.limiter.hits.clear()
 
 
 # ---------- web search (opt-in server tool)
@@ -260,20 +287,22 @@ def test_web_mixes_with_client_tools(seeded):
 
 
 def test_api_web_flag_needs_operator_opt_in(seeded, monkeypatch):
-    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "FINTREND_CHAT_ENABLED", "FINTREND_WEB_SEARCH"):
-        monkeypatch.delenv(k, raising=False)
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     from app.main import app
     c = TestClient(app)
     seen = []
-    orig = chat.stream_chat
-    monkeypatch.setattr("app.main.chat.stream_chat", lambda h, client=None, web=False: (seen.append(web), orig(h, client, web))[1])
+
+    async def stub(history, client=None, web=False, resolved=None):
+        seen.append((web, resolved.provider))
+        yield chat.sse(dict(type="done", usage={}))
+    monkeypatch.setattr("app.main.chat.stream_chat", stub)
     body = {"messages": [{"role": "user", "content": "latest web news on markets"}], "web": True}
     c.post("/api/chat", json=body)
-    assert seen == [False]                                           # server hasn't enabled it -> ignored
+    assert seen == [(False, "claude")]                                # operator hasn't enabled web search -> ignored
     monkeypatch.setenv("FINTREND_WEB_SEARCH", "1")
     assert c.get("/api/chat/status").json()["web_search"] is True
-    r = c.post("/api/chat", json=body)
-    ev = [json.loads(l[6:]) for l in r.text.split("\n\n") if l.startswith("data: ")]
-    assert seen == [False, True] and "sources" in [e["type"] for e in ev]          # demo client simulated a (fake) search
-    assert "placeholders" in "".join(e.get("text", "") for e in ev)
+    c.post("/api/chat", json=body)
+    c.post("/api/chat", json={**body, "web": False})
+    assert seen[1:] == [(True, "claude"), (False, "claude")]          # per-question toggle respected
     chat.limiter.hits.clear()

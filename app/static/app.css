@@ -311,3 +311,10 @@ footer{color:var(--mut);font-size:12.5px;text-align:center;padding:10px 20px 40p
 .source-pill:hover{border-color:var(--a2);transform:translateY(-1px)}
 .source-pill i{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;color:#fff}
 .source-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.banner{margin:0 0 14px;padding:10px 16px;border-radius:14px;font-size:13.5px;font-weight:600;color:var(--pr);background:color-mix(in srgb,var(--pr) 12%,transparent);border:1px solid color-mix(in srgb,var(--pr) 30%,transparent)}
+.hintcard{max-width:720px;margin-top:6px;font-size:14px}
+.hintcard summary{cursor:pointer;font-weight:600;list-style:none}.hintcard summary::-webkit-details-marker{display:none}
+.hintcard summary::before{content:"▸ ";color:var(--a2);display:inline-block;transition:.2s}.hintcard[open] summary::before{transform:rotate(90deg)}
+.hintcard p{margin:.6em 0 0;color:var(--mut)}.hintcard code{background:var(--line);padding:2px 7px;border-radius:6px;font-weight:700;color:var(--fg);white-space:nowrap}
+.hintcard a{color:var(--a1);font-weight:700}

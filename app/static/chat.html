@@ -79,7 +79,10 @@ App.ready('/chat', async () => {
     if (!el) { el = document.createElement('div'); el.id = 'm' + i; el.className = 'msg ' + (m.role === 'user' ? 'user' : 'ai'); thread.appendChild(el); }
     if (m.role === 'user') { el.innerHTML = `<div class="bub">${esc(m.content)}</div>`; return; }
     const last = i === st.msgs.length - 1, live = last && st.busy;
-    const chips = (m.tools || []).map(t => `<span class="tool-chip ${t.done ? (t.ok ? 'ok' : 'bad') : ''}">${t.done ? (t.ok ? '✓' : '!') : '<i class="spin"></i>'} ${esc(t.label)}</span>`).join('');
+    const groups = new Map();
+    (m.tools || []).forEach(t => { const g = groups.get(t.label) || {n: 0, done: 0, bad: 0}; g.n++; if (t.done) { g.done++; if (!t.ok) g.bad++; } groups.set(t.label, g); });
+    const chips = [...groups].map(([label, g]) => { const fin = g.done === g.n;
+      return `<span class="tool-chip ${fin ? (g.bad ? 'bad' : 'ok') : ''}">${fin ? (g.bad ? '!' : '✓') : '<i class="spin"></i>'} ${esc(label)}${g.n > 1 ? ' ×' + g.n : ''}</span>`; }).join('');
     el.innerHTML = `<div class="orb ${live ? 'think' : ''}"><span>✨</span></div><div class="bub">
       ${chips ? `<div class="tools">${chips}</div>` : ''}
       ${m.content ? `<div class="md ${live ? 'caret' : ''}">${md(m.content)}</div>` : (live && !chips ? '<div class="typing"><i></i><i></i><i></i></div>' : '')}
@@ -100,10 +103,15 @@ App.ready('/chat', async () => {
     ['🎓', 'Explain how to read RSI and the 200-day moving average', 'Plain-English investing concepts']];
   function empty() {
     const el = $('#empty'); if (st.msgs.length) { el.innerHTML = ''; return; }
-    if (st.status && !st.status.configured) { el.innerHTML = `<div class="card setup rise"><h2 class="sec" style="margin-top:0">One-time setup</h2>
-      <p>The assistant needs an Anthropic API key. Set it where the server runs, then restart:</p><p><code>export ANTHROPIC_API_KEY="sk-ant-…"</code></p>
-      <p class="src">Get a key at console.anthropic.com. The key stays on your server — it is never sent to the browser. Optional: <code>FINTREND_MODEL</code> (default <code>claude-opus-5-5</code>; <code>claude-sonnet-5-5</code> is cheaper and faster).</p></div>`; return; }
-    el.innerHTML = `<div class="suggest">${SUGGEST.map(([ic, t, s], i) => `<button class="sug" style="--i:${i}" data-q="${esc(t)}"><b>${ic}</b><span>${esc(t)}</span><small>${esc(s)}</small></button>`).join('')}</div>`;
+    el.innerHTML = `<div class="suggest">${SUGGEST.map(([ic, t, s], i) => `<button class="sug" style="--i:${i}" data-q="${esc(t)}"><b>${ic}</b><span>${esc(t)}</span><small>${esc(s)}</small></button>`).join('')}</div>${hint()}`;
+  }
+  function hint() {
+    const p = st.status && st.status.provider;
+    if (p !== 'rules') return '';
+    return `<details class="card hintcard rise"><summary>🧩 You’re using the <b>built-in assistant</b> — instant, free, no AI. Want free-form answers?</summary>
+      <p>It answers the question types above straight from your data. For open-ended questions, switch the engine (restart the server after setting it):</p>
+      <p><b>🦙 Local model, free</b> — install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, then:<br><code>ollama pull llama3.1</code> <code>FINTREND_CHAT=ollama</code></p>
+      <p><b>⚡ Claude, best answers (paid)</b>:<br><code>ANTHROPIC_API_KEY=sk-ant-…</code> <code>FINTREND_CHAT=claude</code></p></details>`;
   }
 
   // ---------- talking to the server (SSE over fetch)
@@ -149,12 +157,14 @@ App.ready('/chat', async () => {
     if (a.dataset.act === 'regen' || a.dataset.act === 'retry') { st.msgs.pop(); const u = st.msgs[st.msgs.length - 1]; if (u?.role === 'user') ask(u.content, {regen: true}); }
   });
 
-  try { st.status = await api('/api/chat/status'); } catch { st.status = {configured: true}; }
-  if (st.status.model) { const t = $('#model'); t.style.display = ''; t.textContent = st.status.demo ? '🧪 Demo mode' : '⚡ ' + st.status.model; }
+  try { st.status = await api('/api/chat/status'); } catch { st.status = {provider: 'rules', model: 'Built-in assistant'}; }
+  const BADGE = {rules: '🧩 Built-in · no AI', ollama: '🦙 ' + st.status.model + ' · local', claude: '⚡ ' + st.status.model};
+  { const t = $('#model'); t.style.display = ''; t.textContent = BADGE[st.status.provider] || st.status.model;
+    t.title = {rules: 'Answers come from rules over your own data — no AI model, no cost', ollama: 'Running on your machine via Ollama — no API cost', claude: 'Claude API — uses API credits'}[st.status.provider] || '';
+    if (st.status.reason) { const n = document.createElement('div'); n.className = 'banner'; n.textContent = 'ℹ ' + st.status.reason; $('.chat-top').after(n); } }
   const webBtn = $('#web'), paintWeb = () => { webBtn.classList.toggle('on', st.web); webBtn.setAttribute('aria-pressed', st.web); };
   if (st.status.web_search) { webBtn.hidden = false; paintWeb();
     webBtn.onclick = () => { st.web = !st.web; try { localStorage.setItem('chat:web', st.web ? '1' : '0'); } catch {} paintWeb(); App.toast(st.web ? '🌐 Web search on for your next questions' : 'Web search off'); box.focus(); }; }
-  if (!st.status.configured) { box.disabled = true; $('#send').disabled = true; box.placeholder = 'Set ANTHROPIC_API_KEY to enable the assistant…'; }
   renderAll(); grow();
 
   // live context rail: click to ask

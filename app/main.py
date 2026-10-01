@@ -132,17 +132,17 @@ class ChatIn(BaseModel):
 
 
 @app.get("/api/chat/status")
-def api_chat_status():
-    return chat.status()
+async def api_chat_status():
+    return await chat.status()
 
 
 @app.post("/api/chat")
 async def api_chat(body: ChatIn, request: Request):
-    if not chat.status()["configured"]:
-        raise HTTPException(503, "Chat is not configured: set ANTHROPIC_API_KEY and restart.")
     if not chat.limiter.allow(request.client.host if request.client else "?"):
         raise HTTPException(429, "Too many questions — please wait a few minutes.")
-    return StreamingResponse(chat.stream_chat([m.model_dump() for m in body.messages], web=body.web and chat.web_enabled()), media_type="text/event-stream",
+    resolved = await chat.resolve()
+    return StreamingResponse(chat.stream_chat([m.model_dump() for m in body.messages], web=body.web and resolved.web, resolved=resolved),
+                             media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

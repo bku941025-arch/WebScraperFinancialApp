@@ -1,7 +1,14 @@
-"""Finance assistant: a streaming Claude tool-use loop grounded in this app's data.
+"""Finance assistant with three interchangeable providers, all using the same tools and UI:
 
-The browser sends plain user/assistant text history; tool calls and results happen server-side
-within one request, so the API key never leaves the server. Output is Server-Sent Events:
+  rules   built-in, no AI: intent matching over the app's own tools (free, offline, the default)
+  ollama  a local open-source model via Ollama's tool-calling API (free per question)
+  claude  the Claude API (best answers; costs API credits)
+
+FINTREND_CHAT=rules|ollama|claude picks one. Unset: Claude if an Anthropic key is present, else rules.
+If the chosen provider isn't usable the answer falls back to rules and says so.
+
+The browser sends plain user/assistant text history; tool calls happen server-side within one request,
+so any API key never leaves the server. Output is Server-Sent Events:
   {"type":"tool_start","id","name","label"}  {"type":"tool_done","id","ok"}
   {"type":"delta","text"}  {"type":"notice","text"}  {"type":"done","usage":{...}}  {"type":"error","message"}
 """
@@ -10,17 +17,18 @@ import logging
 import os
 import time
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from . import chat_tools, quotes
+from . import chat_ollama, chat_rules, chat_tools
+from .chat_common import MAX_HISTORY, clean_history, sse  # noqa: F401  (re-exported)
 
 log = logging.getLogger("chat")
 
 MODEL = os.getenv("FINTREND_MODEL", "claude-opus-5-5")
 MAX_ITERATIONS = 8          # tool-use rounds per question
 MAX_TOKENS = 16000
-MAX_HISTORY = 24            # messages kept from the browser's history
 RATE_LIMIT = (20, 600)      # requests per window (seconds) per client — it's your API bill
 WEB_MAX_SEARCHES = int(os.getenv("FINTREND_WEB_MAX_USES", "4"))  # per question — bounds search cost
 # Models that take `output_config.effort` and the server-side refusal fallback
@@ -72,21 +80,45 @@ limiter = RateLimiter(*RATE_LIMIT)
 
 
 def web_enabled() -> bool:
-    """Operator opt-in. Users then toggle it per message in the UI."""
+    """Operator opt-in for Claude web search. Users then toggle it per message in the UI."""
     return os.getenv("FINTREND_WEB_SEARCH", "").lower() in ("1", "true", "yes", "on")
 
 
-def configured() -> bool:
+def _claude_key() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("FINTREND_CHAT_ENABLED"))
 
 
-def use_demo() -> bool:
-    return quotes.DEMO and not configured()
+@dataclass(frozen=True)
+class Resolved:
+    provider: str            # "rules" | "ollama" | "claude" — what will actually answer
+    model: str               # display name
+    requested: str           # what the operator asked for
+    reason: str | None = None  # why we fell back (None when no fallback)
+
+    @property
+    def web(self) -> bool:
+        return self.provider == "claude" and web_enabled()
 
 
-def status() -> dict:
-    return dict(configured=configured() or use_demo(), demo=use_demo(), model="demo (scripted)" if use_demo() else MODEL,
-                web_search=web_enabled())
+async def resolve() -> Resolved:
+    req = os.getenv("FINTREND_CHAT", "").strip().lower()
+    if req not in ("rules", "ollama", "claude"):
+        req = "claude" if _claude_key() else "rules"
+    if req == "claude":
+        if _claude_key() or os.getenv("FINTREND_CHAT"):  # explicit choice may rely on an `ant auth login` profile
+            return Resolved("claude", MODEL, req)
+        return Resolved("rules", "Built-in assistant", req, "No ANTHROPIC_API_KEY is set. Using the built-in assistant instead.")
+    if req == "ollama":
+        ok, why = await chat_ollama.check()
+        if ok:
+            return Resolved("ollama", chat_ollama.MODEL, req)
+        return Resolved("rules", "Built-in assistant", req, f"{why} Using the built-in assistant instead.")
+    return Resolved("rules", "Built-in assistant", req)
+
+
+async def status() -> dict:
+    r = await resolve()
+    return dict(provider=r.provider, model=r.model, requested=r.requested, reason=r.reason, web_search=r.web)
 
 
 WEB_NOTE = """You also have a web_search tool for information outside this app's data: breaking news, company announcements, \
@@ -128,13 +160,6 @@ def _echo(content: list) -> list:
     return [b for i, b in enumerate(content) if b.type != "fallback" and (i > last or b.type == "text")]
 
 
-def clean_history(raw: list[dict]) -> list[dict]:
-    msgs = [dict(role=m["role"], content=m["content"].strip()) for m in raw if m["content"].strip()][-MAX_HISTORY:]
-    while msgs and msgs[0]["role"] != "user":
-        msgs.pop(0)
-    return msgs
-
-
 def _domain(url: str) -> str:
     return urlparse(url).netloc.removeprefix("www.")
 
@@ -156,26 +181,37 @@ def _source_items(results: dict, cited: dict) -> list[dict]:
     return [dict(title=t, url=u, site=_domain(u), cited=flag) for u, t in pool.items() if u.startswith(("http://", "https://"))][:8]
 
 
-def sse(obj: dict) -> str:
-    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
-
-
 def _make_client():
-    if use_demo():
-        from .chat_demo import DemoClient
-        return DemoClient()
     import anthropic
     return anthropic.AsyncAnthropic()
 
 
-async def stream_chat(history: list[dict], client=None, web: bool = False):
-    """Async generator of SSE strings. `web` enables the server-side web_search tool for this question."""
-    import anthropic
+async def stream_chat(history: list[dict], client=None, web: bool = False, resolved: Resolved | None = None):
+    """Async generator of SSE strings. Dispatches to the active provider; passing `client` forces the Claude
+    path with that client (used by tests). `web` enables Claude's server-side web_search for this question."""
     messages = clean_history(history)
     if not messages or messages[-1]["role"] != "user":
         yield sse(dict(type="error", message="Ask a question to get started."))
         return
-    client = client or _make_client()
+    if client is None:
+        resolved = resolved or await resolve()
+        if resolved.reason:
+            yield sse(dict(type="notice", text=resolved.reason))
+        if resolved.provider == "rules":
+            async for ev in chat_rules.stream(messages):
+                yield ev
+            return
+        if resolved.provider == "ollama":
+            async for ev in chat_ollama.stream(messages, SYSTEM):
+                yield ev
+            return
+        client = _make_client()
+    async for ev in _stream_claude(messages, client, web):
+        yield ev
+
+
+async def _stream_claude(messages: list[dict], client, web: bool):
+    import anthropic
     usage = dict(input=0, output=0, cache_read=0, rounds=0)
     found: dict = {}
     cited: dict = {}
