@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend — Ask AI</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<body>
+<div class="wrap">
+  <section class="chat-top">
+    <div class="orb big"><span>✨</span></div>
+    <div class="grow"><h1>Ask <span class="grad">FinTrend AI</span></h1>
+      <p>Markets, companies, earnings and filings — answered from the live data in this app.</p></div>
+    <span class="tag" id="model" style="display:none"></span><button class="chip" id="new">＋ New chat</button>
+  </section>
+  <div class="chat-grid">
+    <main>
+      <div id="empty"></div>
+      <div id="thread" aria-live="polite"></div>
+    </main>
+    <aside class="rail">
+      <div class="card"><h2 class="sec">🔥 Hot right now</h2><div id="hot"><div class="skel" style="height:120px"></div></div></div>
+      <div class="card"><h2 class="sec">📅 Reporting soon</h2><div id="soon"><div class="skel" style="height:90px"></div></div></div>
+    </aside>
+  </div>
+</div>
+<div class="composer-bar"><div class="wrap">
+  <form class="composer" id="form">
+    <textarea id="box" rows="1" maxlength="2000" placeholder="Ask about a stock, a sector, earnings, or what's bullish…" aria-label="Message"></textarea>
+    <button class="send" id="send" type="submit" aria-label="Send">➤</button>
+  </form>
+  <div class="hint"><span>Enter to send · Shift+Enter for a new line</span><span>Information only — not personalised financial advice.</span></div>
+</div></div>
+<script>
+App.ready('/chat', async () => {
+  const {$, esc, api} = App;
+  const KEY = 'chat:v1', MAX_HIST = 24;
+  const st = {msgs: [], busy: false, ctrl: null, status: null};
+  try { st.msgs = (JSON.parse(localStorage.getItem(KEY) || '[]') || []).filter(m => m && m.role && typeof m.content === 'string'); } catch {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st.msgs.slice(-40).map(m => ({role: m.role, content: m.content, tools: m.tools})))); } catch {} };
+
+  // ---------- small, safe markdown renderer (HTML is escaped first; only http(s) links)
+  function inline(s) {
+    s = esc(s);
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+         .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>')
+         .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+         .replace(/(^|[^\w/])\$([A-Z]{1,5}(?:[.-][A-Z])?|\d{4}\.[A-Z]{1,2})\b/g, '$1<a class="cash" href="/company/$2">$$$2</a>');
+    return s;
+  }
+  function md(src) {
+    const codes = [];
+    src = src.replace(/```[\w-]*\n([\s\S]*?)(```|$)/g, (_, c) => { codes.push(`<pre><code>${esc(c.replace(/\n$/, ''))}</code></pre>`); return `\u0000${codes.length - 1}\u0000`; });
+    const L = src.split('\n'), out = []; let i = 0;
+    const isTable = j => /^\s*\|.*\|\s*$/.test(L[j] || '') && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(L[j + 1] || '');
+    const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    while (i < L.length) {
+      const l = L[i];
+      if (!l.trim()) { i++; continue; }
+      let m;
+      if ((m = l.match(/^\u0000(\d+)\u0000$/))) { out.push(codes[+m[1]]); i++; }
+      else if ((m = l.match(/^(#{1,4})\s+(.*)$/))) { out.push(`<h${m[1].length + 2}>${inline(m[2])}</h${m[1].length + 2}>`); i++; }
+      else if (/^\s*(-{3,}|\*{3,})\s*$/.test(l)) { out.push('<hr>'); i++; }
+      else if (isTable(i)) { const head = cells(l); i += 2; const rows = [];
+        while (i < L.length && /^\s*\|.*\|\s*$/.test(L[i])) rows.push(cells(L[i++]));
+        out.push(`<div class="tbl"><table><thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`); }
+      else if (/^\s*[-*•]\s+/.test(l)) { const it = []; while (i < L.length && /^\s*[-*•]\s+/.test(L[i])) it.push(`<li>${inline(L[i++].replace(/^\s*[-*•]\s+/, ''))}</li>`); out.push(`<ul>${it.join('')}</ul>`); }
+      else if (/^\s*\d+[.)]\s+/.test(l)) { const it = []; while (i < L.length && /^\s*\d+[.)]\s+/.test(L[i])) it.push(`<li>${inline(L[i++].replace(/^\s*\d+[.)]\s+/, ''))}</li>`); out.push(`<ol>${it.join('')}</ol>`); }
+      else if (/^>\s?/.test(l)) { const q = []; while (i < L.length && /^>\s?/.test(L[i])) q.push(inline(L[i++].replace(/^>\s?/, ''))); out.push(`<blockquote>${q.join('<br>')}</blockquote>`); }
+      else { const p = []; while (i < L.length && L[i].trim() && !/^(#{1,4}\s|\s*[-*•]\s|\s*\d+[.)]\s|>|\u0000\d+\u0000$)/.test(L[i]) && !isTable(i)) p.push(inline(L[i++])); out.push(`<p>${p.join('<br>') || inline(L[i++] || '')}</p>`); }
+    }
+    return out.join('');
+  }
+
+  // ---------- rendering
+  const thread = $('#thread');
+  const nearBottom = () => innerHeight + scrollY > document.documentElement.scrollHeight - 180;
+  const toBottom = () => scrollTo({top: document.documentElement.scrollHeight, behavior: 'smooth'});
+  function view(i) {
+    const m = st.msgs[i]; let el = document.getElementById('m' + i);
+    if (!el) { el = document.createElement('div'); el.id = 'm' + i; el.className = 'msg ' + (m.role === 'user' ? 'user' : 'ai'); thread.appendChild(el); }
+    if (m.role === 'user') { el.innerHTML = `<div class="bub">${esc(m.content)}</div>`; return; }
+    const last = i === st.msgs.length - 1, live = last && st.busy;
+    const chips = (m.tools || []).map(t => `<span class="tool-chip ${t.done ? (t.ok ? 'ok' : 'bad') : ''}">${t.done ? (t.ok ? '✓' : '!') : '<i class="spin"></i>'} ${esc(t.label)}</span>`).join('');
+    el.innerHTML = `<div class="orb ${live ? 'think' : ''}"><span>✨</span></div><div class="bub">
+      ${chips ? `<div class="tools">${chips}</div>` : ''}
+      ${m.content ? `<div class="md ${live ? 'caret' : ''}">${md(m.content)}</div>` : (live && !chips ? '<div class="typing"><i></i><i></i><i></i></div>' : '')}
+      ${m.notice ? `<div class="note">${esc(m.notice)}</div>` : ''}
+      ${m.err ? `<div class="err">⚠ ${esc(m.err)} <button class="chip sm" data-act="retry">Try again</button></div>` : ''}
+      ${!live && m.content ? `<div class="msg-actions ${last ? 'show' : ''}"><button class="mini-btn" data-act="copy" data-i="${i}">⧉ Copy</button>${last ? '<button class="mini-btn" data-act="regen">↻ Regenerate</button>' : ''}</div>` : ''}</div>`;
+  }
+  const renderAll = () => { thread.innerHTML = ''; st.msgs.forEach((_, i) => view(i)); empty(); };
+  let raf = 0; const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; const nb = nearBottom(); view(st.msgs.length - 1); if (nb) scrollTo({top: document.documentElement.scrollHeight}); }); };
+  function setBusy(b) { st.busy = b; const s = $('#send'); s.textContent = b ? '■' : '➤'; s.classList.toggle('stop', b); s.disabled = !b && !$('#box').value.trim(); s.setAttribute('aria-label', b ? 'Stop' : 'Send'); }
+
+  const SUGGEST = [['📈', 'What looks bullish right now?', 'Trending companies ranked by momentum, tone and catalysts'],
+    ['🔍', 'Give me a full read on $NVDA', 'Price action, technicals, news and the next earnings date'],
+    ['📅', 'Which companies report earnings this week — and which are worth watching?', 'Earnings calendar cross-checked with the news'],
+    ['⚖️', 'Compare $AAPL and $MSFT', 'Momentum, valuation context, risks and catalysts'],
+    ['🏛️', 'Any notable 8-K filings today?', 'Material agreements, executive changes, results'],
+    ['🎓', 'Explain how to read RSI and the 200-day moving average', 'Plain-English investing concepts']];
+  function empty() {
+    const el = $('#empty'); if (st.msgs.length) { el.innerHTML = ''; return; }
+    if (st.status && !st.status.configured) { el.innerHTML = `<div class="card setup rise"><h2 class="sec" style="margin-top:0">One-time setup</h2>
+      <p>The assistant needs an Anthropic API key. Set it where the server runs, then restart:</p><p><code>export ANTHROPIC_API_KEY="sk-ant-…"</code></p>
+      <p class="src">Get a key at console.anthropic.com. The key stays on your server — it is never sent to the browser. Optional: <code>FINTREND_MODEL</code> (default <code>claude-opus-5-5</code>; <code>claude-sonnet-5-5</code> is cheaper and faster).</p></div>`; return; }
+    el.innerHTML = `<div class="suggest">${SUGGEST.map(([ic, t, s], i) => `<button class="sug" style="--i:${i}" data-q="${esc(t)}"><b>${ic}</b><span>${esc(t)}</span><small>${esc(s)}</small></button>`).join('')}</div>`;
+  }
+
+  // ---------- talking to the server (SSE over fetch)
+  async function ask(text, {regen = false} = {}) {
+    if (st.busy || !text.trim()) return;
+    if (!regen) st.msgs.push({role: 'user', content: text.trim()});
+    st.msgs.push({role: 'assistant', content: '', tools: []});
+    empty(); renderAll(); setBusy(true); toBottom();
+    const hist = st.msgs.slice(0, -1).filter(m => m.content && !m.err).map(m => ({role: m.role, content: m.content.slice(0, 5900)})).slice(-MAX_HIST);
+    const ai = st.msgs[st.msgs.length - 1]; st.ctrl = new AbortController();
+    try {
+      const res = await fetch('/api/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({messages: hist}), signal: st.ctrl.signal});
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(typeof j.detail === 'string' ? j.detail : 'Request failed (' + res.status + ')'); }
+      const rd = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for (;;) {
+        const {value, done} = await rd.read(); if (done) break;
+        buf += dec.decode(value, {stream: true}); let k;
+        while ((k = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, k); buf = buf.slice(k + 2); if (!chunk.startsWith('data: ')) continue;
+          const e = JSON.parse(chunk.slice(6));
+          if (e.type === 'delta') ai.content += e.text;
+          else if (e.type === 'tool_start') ai.tools.push({id: e.id, label: e.label, done: false});
+          else if (e.type === 'tool_done') { const t = ai.tools.find(t => t.id === e.id); if (t) { t.done = true; t.ok = e.ok; } }
+          else if (e.type === 'notice') ai.notice = e.text;
+          else if (e.type === 'error') ai.err = e.message;
+          paint(); }
+      }
+    } catch (err) { if (err.name === 'AbortError') ai.notice = 'Stopped.'; else ai.err = err.message || 'Something went wrong.'; }
+    if (!ai.content && !ai.err && !ai.notice) ai.err = 'No answer came back.';
+    st.ctrl = null; setBusy(false); view(st.msgs.length - 1); save(); $('#box').focus();
+  }
+
+  // ---------- wiring
+  const box = $('#box'), grow = () => { box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 170) + 'px'; $('#send').disabled = !st.busy && !box.value.trim(); };
+  box.oninput = grow;
+  box.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#form').requestSubmit(); } };
+  $('#form').onsubmit = e => { e.preventDefault(); if (st.busy) { st.ctrl?.abort(); return; } const t = box.value; if (!t.trim()) return; box.value = ''; grow(); ask(t); };
+  $('#new').onclick = () => { st.ctrl?.abort(); st.msgs = []; save(); setBusy(false); renderAll(); box.focus(); };
+  document.body.addEventListener('click', e => {
+    const q = e.target.closest('[data-q]'); if (q) { ask(q.dataset.q); return; }
+    const a = e.target.closest('[data-act]'); if (!a) return;
+    if (a.dataset.act === 'copy') { navigator.clipboard?.writeText(st.msgs[+a.dataset.i].content); a.textContent = '✓ Copied'; setTimeout(() => a.textContent = '⧉ Copy', 1400); }
+    if (a.dataset.act === 'regen' || a.dataset.act === 'retry') { st.msgs.pop(); const u = st.msgs[st.msgs.length - 1]; if (u?.role === 'user') ask(u.content, {regen: true}); }
+  });
+
+  try { st.status = await api('/api/chat/status'); } catch { st.status = {configured: true}; }
+  if (st.status.model) { const t = $('#model'); t.style.display = ''; t.textContent = st.status.demo ? '🧪 Demo mode' : '⚡ ' + st.status.model; }
+  if (!st.status.configured) { box.disabled = true; $('#send').disabled = true; box.placeholder = 'Set ANTHROPIC_API_KEY to enable the assistant…'; }
+  renderAll(); grow();
+
+  // live context rail: click to ask
+  Promise.all([api('/api/trends?hours=24&limit=6'), api('/api/earnings?days=7&top=4')]).then(([tr, er]) => {
+    $('#hot').innerHTML = tr.map(t => `<button class="row-b" data-q="${esc('Give me a quick read on $' + t.ticker + ': what is driving it, price action and upcoming catalysts.')}">
+      <span><b>${esc(t.ticker)}</b> <span class="src">${esc(t.name)}</span></span>${App.tonePill(t.tone)}</button>`).join('') || '<div class="src">No data yet.</div>';
+    $('#soon').innerHTML = er.map(r => `<button class="row-b" data-q="${esc('What should I know going into $' + r.ticker + ' earnings on ' + r.date + '?')}">
+      <span><b>${esc(r.ticker)}</b></span><span class="tag pr">${esc(App.shortDay(r.date))} · ${r.time === 'bmo' ? 'BMO' : r.time === 'amc' ? 'AMC' : '—'}</span></button>`).join('') || '<div class="src">Nothing scheduled.</div>';
+  }).catch(() => { $('#hot').innerHTML = $('#soon').innerHTML = '<div class="src">Unavailable.</div>'; });
+});
+</script></body></html>

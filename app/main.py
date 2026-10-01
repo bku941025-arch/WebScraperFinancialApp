@@ -5,11 +5,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, earnings, quotes, scheduler, scraper, trends, universe
+from . import chat, db, earnings, quotes, scheduler, scraper, trends, universe
 from .sources import SOURCES
 
 MARKETS = scheduler.parse_markets(os.getenv("SCHEDULE_MARKETS", "US"))
@@ -118,6 +121,30 @@ def api_earnings(days: int = Query(14, ge=1, le=60), only_trending: bool = False
         return earnings.upcoming(conn, days, only_trending, q, top, limit)
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=6000)
+
+
+class ChatIn(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=60)
+
+
+@app.get("/api/chat/status")
+def api_chat_status():
+    return chat.status()
+
+
+@app.post("/api/chat")
+async def api_chat(body: ChatIn, request: Request):
+    if not chat.status()["configured"]:
+        raise HTTPException(503, "Chat is not configured: set ANTHROPIC_API_KEY and restart.")
+    if not chat.limiter.allow(request.client.host if request.client else "?"):
+        raise HTTPException(429, "Too many questions — please wait a few minutes.")
+    return StreamingResponse(chat.stream_chat([m.model_dump() for m in body.messages]), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.get("/api/regions")
 def api_regions():
     return sorted({s.region for s in SOURCES})
@@ -158,7 +185,7 @@ async def api_refresh():
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/earnings": "earnings.html", "/status": "status.html"}
+PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/earnings": "earnings.html", "/chat": "chat.html", "/status": "status.html"}
 for _path, _file in PAGES.items():
     app.get(_path, include_in_schema=False)(lambda f=_file: FileResponse(STATIC / f))
 

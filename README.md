@@ -37,11 +37,28 @@ FINTREND_DB=demo.db FINTREND_DEMO=1 DISABLE_SCHEDULER=1 python -m uvicorn app.ma
 | `/markets` | Trend "bubble cloud" + per-region breakdown |
 | `/feed` | Searchable feed of news, press releases and SEC 8-K filings with region and time filters |
 | `/company/{ticker}` | Price chart (line/candles, 1D–1Y), stock summary, next earnings, mentions-over-time, sources, regions, related companies |
+| `/chat` | **FinTrend AI** — streaming chat assistant grounded in the app's own data (trends, prices & technicals, news, filings, earnings) |
 | `/status` | Next scheduled runs (live countdown), per-source health, run history, "Run now" |
 
 Click any trending row on the dashboard to expand it into a price chart. The search box in the top bar (press `/`) finds
 any ticker or company and previews its price, ranges, volume, news count and next earnings; Enter opens the full page.
 Light/dark theme toggle (top right) remembers your choice.
+
+## AI assistant (`/chat`)
+Ask things like "what looks bullish right now?", "give me a full read on $NVDA", "compare $AAPL and $MSFT" or "who reports
+earnings this week?". It runs on the Claude API from the **server** (your key never reaches the browser) and answers using tools
+over this app's data: trending companies, price action + technicals (returns, 50/200-day averages, RSI, volatility), company
+news and 8-K filings, keyword search, the earnings calendar, and a market overview. Answers stream in with tool-activity chips,
+Markdown tables, and clickable `$TICKER` links.
+```
+export ANTHROPIC_API_KEY="sk-ant-..."        # required for real answers
+export FINTREND_MODEL=claude-sonnet-5-5      # optional; default claude-opus-5-5 (Sonnet is cheaper/faster)
+```
+- It gives analysis and views grounded in data, framed as information rather than personalised advice, and says when data is thin.
+- Safeguards: tool results are treated as untrusted text, per-IP rate limit (20 questions / 10 min), a cap on tool rounds
+  per question, and conversation history lives only in your browser (localStorage; "New chat" clears it).
+- Each question uses API credits (a few tool calls + a streamed answer). Without a key the page shows setup instructions; with
+  `FINTREND_DEMO=1` and no key it uses a clearly-labelled scripted responder over the demo data so you can try the UI offline.
 
 ## Schedule: 3 scrapes per trading day
 Instead of constant polling, feeds are collected **just after the open (+5 min), at mid-session,

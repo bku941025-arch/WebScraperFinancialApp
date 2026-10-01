@@ -173,7 +173,7 @@ const App = (() => {
     document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); input.focus(); input.select(); } });
   }
 
-  const NAV = [['/', 'Dashboard'], ['/markets', 'Markets'], ['/earnings', 'Earnings'], ['/feed', 'News & Filings'], ['/status', 'Status']];
+  const NAV = [['/', 'Dashboard'], ['/markets', 'Markets'], ['/earnings', 'Earnings'], ['/feed', 'News & Filings'], ['/status', 'Status'], ['/chat', '✨ Ask AI']];
   function chrome(active) {
     document.body.insertAdjacentHTML('afterbegin',
       `<div class="bg"><i></i><i></i><i></i></div>
