@@ -44,11 +44,17 @@ any ticker or company and previews its price, ranges, volume, news count and nex
 Light/dark theme toggle (top right) remembers your choice.
 
 ## Assistant (dashboard card) — works with no AI and no key
-The assistant is a card on the dashboard (collapsible; `/chat` redirects there). You choose from a **question bank** — four tabs
-(Market pulse · Companies · Earnings & filings · Learn), ~25 questions such as "What looks bullish right now?", "Who reports
-earnings this week?" or "What is RSI?". Company questions have the company as an inline dropdown — "Give me a full read on
-[NVDA ▾]", "Compare [TSLA ▾] with [AAPL ▾]" — populated with what's trending now plus popular names, or choose **Other…** and
-type a ticker or company name. Answers stream in with tool-activity chips, Markdown tables and clickable `$TICKER` links.
+The assistant is a card on the dashboard (collapsible; `/chat` redirects there) with a guided flow instead of a blank chat box:
+
+1. **Home** — one big *"Look up a company"* search (type a ticker or a name; autocomplete), one-click chips for what's trending now
+   (green dot = positive headline tone), three topic cards (*What's moving · Earnings & filings · Learn the basics*) and a few
+   popular questions.
+2. **Pick a company** → large action tiles: *Full read, Latest news, Next earnings, SEC filings, Buy signals, Compare* (compare asks
+   for the second company). **Pick a topic** → a plain list of questions.
+3. **Conversation** — answers stream in with tool-activity chips, Markdown tables and clickable `$TICKER` links, followed by
+   **"Ask next"** suggestions (the other actions for the same company, or more questions from the same topic) so you rarely return to
+   the menu. *＋ New question* goes back to Home; *Clear chat* wipes the history.
+
 The free-text box only appears with the local-model or Claude engines (below), since only those can handle open-ended questions.
 The question list lives in `app/question_bank.py`, and a test checks that every question is understood by the built-in
 assistant, so the menu and the answers can't drift apart. Three interchangeable engines share the same tools (trending companies, price action + technicals, company news and

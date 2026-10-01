@@ -1,8 +1,8 @@
-/* FinTrend AI assistant card — embedded in the dashboard. Depends on app.js (App). */
+/* FinTrend AI assistant card — embedded in the dashboard. Depends on app.js (App).
+   Guided flow: home (search a company / pick a topic) → topic questions or company actions → conversation. */
 const Assistant = (() => {
   const {esc, api} = App;
   const KEY = 'chat:v1', MAX_HIST = 24;
-  const POPULAR = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'JPM'];
 
   // ---------- small, safe markdown renderer (HTML is escaped first; only http(s) links)
   function inline(s) {
@@ -39,7 +39,7 @@ const Assistant = (() => {
   const TEMPLATE = `
     <div class="ask-head">
       <div class="orb"><span>✨</span></div>
-      <div class="grow"><h2>Ask <span class="grad">FinTrend AI</span></h2><p data-r="sub">Pick a question — I’ll pull live data and answer.</p></div>
+      <div class="grow"><h2>Ask <span class="grad">FinTrend AI</span></h2><p data-r="sub">Ask about any company or the market — answered from live data.</p></div>
       <span class="tag" data-r="badge" hidden></span>
       <button class="mini-btn" data-r="clear" hidden>Clear chat</button>
       <button class="icon-btn" data-r="toggle" aria-expanded="true" aria-label="Collapse assistant"><span class="chev">⌄</span></button>
@@ -47,41 +47,32 @@ const Assistant = (() => {
     <div class="ask-peek" data-r="peek"></div>
     <div class="ask-body">
       <div class="banner" data-r="banner" hidden></div>
-      <div class="ask-grid">
-        <aside class="bank">
-          <h3 class="bank-title">Question bank</h3>
-          <div class="btabs" data-r="tabs" role="tablist"></div>
-          <div class="blist" data-r="list"></div>
-          <div class="bank-foot" data-r="foot"></div>
-        </aside>
-        <section class="pane">
-          <button class="stop" data-r="stop" hidden>■ Stop</button>
-          <div class="pane-empty" data-r="empty"></div>
-          <div class="thread" data-r="thread" aria-live="polite" hidden></div>
-          <form class="composer" data-r="form" hidden>
-            <textarea data-r="box" rows="1" maxlength="2000" placeholder="…or type your own question" aria-label="Message"></textarea>
-            <button class="webtog" data-r="web" type="button" hidden aria-pressed="false" title="Let the assistant search the web for this question (uses extra API credits)">🌐 Web</button>
-            <button class="send" data-r="send" type="submit" aria-label="Send" disabled>➤</button>
-          </form>
-        </section>
-      </div>
+      <div class="ask-main" data-r="main"><div class="skel" style="height:56px;border-radius:999px"></div><div class="skel" style="height:110px;margin-top:14px"></div></div>
+      <form class="composer" data-r="form" hidden>
+        <div class="box"><textarea data-r="box" rows="1" maxlength="2000" placeholder="…or type your own question" aria-label="Type your own question"></textarea>
+          <button class="webtog" data-r="web" type="button" hidden aria-pressed="false" title="Let the assistant search the web for this question (uses extra API credits)">🌐 Web</button>
+          <button class="send" data-r="send" type="submit" aria-label="Send" disabled>➤</button></div>
+      </form>
     </div>`;
 
   async function mount(root) {
     root.classList.add('ask'); root.innerHTML = TEMPLATE;
     const R = {}; root.querySelectorAll('[data-r]').forEach(e => R[e.dataset.r] = e);
-    const st = {msgs: [], busy: false, ctrl: null, status: {provider: 'rules', model: 'Built-in assistant'}, web: false, bank: [], tab: 'pulse',
-                tickers: [], slots: {}, other: {}, open: true};
+    const st = {msgs: [], busy: false, ctrl: null, status: {provider: 'rules', model: 'Built-in assistant'}, web: false, bank: [], tickers: [],
+                view: 'home', topic: null, company: null, compare: false, ctx: null, open: true, pk: {items: [], act: 0, tok: 0}};
     try { st.msgs = (JSON.parse(localStorage.getItem(KEY) || '[]') || []).filter(m => m && m.role && typeof m.content === 'string'); } catch {}
     try { st.web = localStorage.getItem('chat:web') === '1'; st.open = localStorage.getItem('ask:open') !== '0'; } catch {}
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st.msgs.slice(-40).map(m => ({role: m.role, content: m.content, tools: m.tools, sources: m.sources})))); } catch {} };
+    const cat = id => st.bank.find(c => c.id === id);
+    const ctxAttr = o => `data-ctx="${esc(JSON.stringify(o))}"`;
+    const thread = () => R.main.querySelector('[data-t=thread]');
 
-    // ---------- conversation
-    const nearBottom = () => R.thread.scrollHeight - R.thread.scrollTop - R.thread.clientHeight < 160;
-    const toBottom = () => { R.thread.scrollTop = R.thread.scrollHeight; };
+    // ---------- conversation messages
+    const nearBottom = () => { const t = thread(); return !t || t.scrollHeight - t.scrollTop - t.clientHeight < 160; };
+    const toBottom = () => { const t = thread(); if (t) t.scrollTop = t.scrollHeight; };
     function view(i) {
-      const m = st.msgs[i]; let el = R.thread.querySelector('#m' + i);
-      if (!el) { el = document.createElement('div'); el.id = 'm' + i; el.className = 'msg ' + (m.role === 'user' ? 'user' : 'ai'); R.thread.appendChild(el); }
+      const T = thread(); if (!T) return; const m = st.msgs[i]; let el = T.querySelector('#m' + i);
+      if (!el) { el = document.createElement('div'); el.id = 'm' + i; el.className = 'msg ' + (m.role === 'user' ? 'user' : 'ai'); T.appendChild(el); }
       if (m.role === 'user') { el.innerHTML = `<div class="bub">${esc(m.content)}</div>`; return; }
       const last = i === st.msgs.length - 1, live = last && st.busy;
       const groups = new Map();
@@ -96,25 +87,85 @@ const Assistant = (() => {
         ${m.err ? `<div class="err">⚠ ${esc(m.err)} <button class="chip sm" data-act="retry">Try again</button></div>` : ''}
         ${!live && m.content ? `<div class="msg-actions ${last ? 'show' : ''}"><button class="mini-btn" data-act="copy" data-i="${i}">⧉ Copy</button>${last ? '<button class="mini-btn" data-act="regen">↻ Regenerate</button>' : ''}</div>` : ''}</div>`;
     }
-    function renderThread() {
-      R.thread.innerHTML = ''; st.msgs.forEach((_, i) => view(i));
-      const has = st.msgs.length > 0; R.thread.hidden = !has; R.empty.hidden = has; R.clear.hidden = !has; toBottom();
-    }
     let raf = 0;
-    const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; const nb = nearBottom(); view(st.msgs.length - 1); if (nb) toBottom(); }); };
+    const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; const nb = nearBottom(); view(st.msgs.length - 1); if (nb && st.busy) toBottom(); }); };   // follow the text only while it streams
+
+    // ---------- follow-up suggestions (client-side, from what the user just asked)
+    function suggestions() {
+      const c = st.ctx; if (!c) return [];
+      if (c.kind === 'company') return cat('company').questions.filter(q => q.text !== c.text).map(q => q.slots.length > 1
+        ? {label: q.icon + ' Compare…', go: 'compare'}
+        : {label: q.icon + ' ' + q.label, text: q.text.replace('{A}', '$' + c.ticker), ctx: {kind: 'company', ticker: c.ticker, name: c.name, text: q.text}}).slice(0, 5);
+      const out = (cat(c.id)?.questions || []).filter(q => q.text !== c.text && !q.slots.length).slice(0, 3).map(q => ({label: q.text, text: q.text, ctx: {kind: 'topic', id: c.id, text: q.text}}));
+      const top = st.tickers[0];
+      if ((c.id === 'pulse' || c.id === 'calendar') && top) out.push({label: '📊 Full read on ' + top.ticker, text: 'Give me a full read on $' + top.ticker, ctx: {kind: 'company', ticker: top.ticker, name: top.name, text: cat('company').questions[0].text}});
+      return out;
+    }
+    function dockHTML() {
+      if (st.busy) return '<span class="grow"></span><button class="stopbtn" data-stop>■ Stop</button>';
+      const sug = suggestions();
+      return (sug.length ? '<span class="sec-lbl">Ask next</span>' : '') + sug.map(s => s.go ? `<button class="pop" data-go="${s.go}">${esc(s.label)}</button>`
+        : `<button class="pop" data-ask="${esc(s.text)}" ${ctxAttr(s.ctx)}>${esc(s.label)}</button>`).join('') + '<span class="grow"></span><button class="nq" data-go="home">＋ New question</button>';
+    }
     function setBusy(b) {
-      st.busy = b; R.stop.hidden = !b; R.send.disabled = b || !R.box.value.trim();
-      root.querySelectorAll('.qrow').forEach(r => r.style.pointerEvents = b ? 'none' : ''); root.querySelectorAll('.qrow').forEach(r => r.style.opacity = b ? .55 : '');
+      st.busy = b; R.send.disabled = b || !R.box.value.trim();
+      const d = R.main.querySelector('[data-t=dock]'); if (d) d.innerHTML = dockHTML();
     }
 
-    async function ask(text, {regen = false} = {}) {
+    // ---------- views
+    const tchip = (t, attr) => `<button class="tchip" ${attr}="${esc(t.ticker)}" data-name="${esc(t.name)}" title="${esc(t.name)}"><i class="${t.tone > .15 ? 'up' : t.tone < -.15 ? 'down' : ''}"></i>${esc(t.ticker)}</button>`;
+    const pickerHTML = (id, ph, small) => `<div class="cp ${small ? 'sm' : ''}" data-picker="${id}"><div class="cp-box"><span aria-hidden="true">🔍</span>
+      <input class="cp-input" placeholder="${esc(ph)}" autocomplete="off" spellcheck="false" aria-label="${esc(ph)}"></div><div class="cp-drop" hidden></div></div>`;
+    function upgradeHTML() {
+      if (st.status.provider !== 'rules') return '';
+      return `<details class="upgrade"><summary>Want to type your own questions?</summary>
+        <p>The built-in assistant is instant and free but answers the questions above. For free-form questions, run a local model: install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <code>ollama pull llama3.1</code>, then start the server with <code>FINTREND_CHAT=ollama</code>. Or use Claude: <code>ANTHROPIC_API_KEY=…</code> with <code>FINTREND_CHAT=claude</code>.</p></details>`;
+    }
+    function homeHTML() {
+      const topics = st.bank.filter(c => c.id !== 'company'), featured = st.bank.flatMap(c => c.questions.filter(q => q.featured).map(q => ({q, c})));
+      return `<h3 class="ask-q">What would you like to know?</h3>
+        ${pickerHTML('home', 'Look up a company — try NVDA, Tesla or 7203.T', false)}
+        ${st.tickers.length ? `<div class="trend-row"><span class="lbl">Trending now</span>${st.tickers.slice(0, 6).map(t => tchip(t, 'data-company')).join('')}</div>` : ''}
+        <div class="topics">${topics.map((c, i) => `<button class="topic" style="--i:${i}" data-topic="${c.id}"><span class="ic">${c.icon}</span><b>${esc(c.title)}</b><small>${esc(c.blurb)}</small></button>`).join('')}</div>
+        <div class="popular"><span class="sec-lbl">Popular</span>${featured.map(({q, c}) => `<button class="pop" data-ask="${esc(q.text)}" ${ctxAttr({kind: 'topic', id: c.id, text: q.text})}>${esc(q.text)}</button>`).join('')}</div>
+        ${st.msgs.length ? '<div class="resume"><button class="back" data-go="chat">↩ Back to your conversation</button></div>' : ''}${upgradeHTML()}`;
+    }
+    function topicHTML() {
+      const c = cat(st.topic);
+      return `<div class="ask-nav"><button class="back" data-go="home">← Back</button><span class="ttl">${c.icon} ${esc(c.title)}</span></div>
+        <div class="qlist">${c.questions.map((q, i) => `<button class="qbtn" style="--i:${i}" data-ask="${esc(q.text)}" ${ctxAttr({kind: 'topic', id: c.id, text: q.text})}>${esc(q.text)}</button>`).join('')}</div>`;
+    }
+    function companyHTML() {
+      const co = st.company, acts = cat('company').questions;
+      return `<div class="ask-nav"><button class="back" data-go="home">← Back</button>
+          <span class="co">${esc(co.ticker)} <small>${esc(co.name)}</small><button data-go="home" aria-label="Choose a different company" title="Choose a different company">✕</button></span></div>
+        <h3 class="ask-q" style="font-size:22px;margin-top:12px">What do you want to know about ${esc(co.ticker)}?</h3>
+        <div class="tiles">${acts.map((q, i) => q.slots.length > 1
+          ? `<button class="tile ${st.compare ? 'on' : ''}" style="--i:${i}" data-compare-toggle><span class="ic">${q.icon}</span><b>${esc(q.label)}</b><small>${esc(q.hint)}</small></button>`
+          : `<button class="tile" style="--i:${i}" data-ask="${esc(q.text.replace('{A}', '$' + co.ticker))}" ${ctxAttr({kind: 'company', ticker: co.ticker, name: co.name, text: q.text})}><span class="ic">${q.icon}</span><b>${esc(q.label)}</b><small>${esc(q.hint)}</small></button>`).join('')}</div>
+        ${st.compare ? `<div class="cmp"><p>Compare ${esc(co.ticker)} with…</p>${pickerHTML('compare', 'Search a company to compare', true)}
+          <div class="trend-row">${st.tickers.filter(t => t.ticker !== co.ticker).slice(0, 6).map(t => tchip(t, 'data-cmp')).join('')}</div></div>` : ''}`;
+    }
+    function render() {
+      const v = st.view;
+      R.main.innerHTML = `<div class="ask-view">${v === 'topic' ? topicHTML() : v === 'company' ? companyHTML() : v === 'chat' ? '<div class="thread" data-t="thread" aria-live="polite"></div><div class="dock" data-t="dock"></div>' : homeHTML()}</div>`;
+      if (v === 'chat') { st.msgs.forEach((_, i) => view(i)); toBottom(); R.main.querySelector('[data-t=dock]').innerHTML = dockHTML(); }
+      R.clear.hidden = !st.msgs.length;
+    }
+    const go = (v, o = {}) => { Object.assign(st, {view: v}, o); render(); };
+
+    // ---------- asking
+    async function ask(text, ctx = null, {regen = false} = {}) {
       if (st.busy || !text.trim()) return;
       if (!st.open) setOpen(true);
-      if (!regen) st.msgs.push({role: 'user', content: text.trim()});
+      const inChat = st.view === 'chat' && thread() && !regen;               // follow-up inside the conversation: append, don't rebuild
+      st.ctx = ctx; if (!regen) st.msgs.push({role: 'user', content: text.trim()});
       st.msgs.push({role: 'assistant', content: '', tools: []});
-      renderThread(); setBusy(true);
-      if (matchMedia('(max-width:900px)').matches) R.empty.closest('.pane').scrollIntoView({behavior: 'smooth', block: 'start'});   // stacked layout: bring the answer into view
-      else if (root.getBoundingClientRect().top < 0 || root.getBoundingClientRect().bottom > innerHeight) root.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      st.view = 'chat';
+      if (inChat) { view(st.msgs.length - 2); view(st.msgs.length - 1); setBusy(true); toBottom(); R.clear.hidden = false; }
+      else { st.busy = true; render(); }
+      R.send.disabled = true;
+      if (root.getBoundingClientRect().top < 0 || root.getBoundingClientRect().bottom > innerHeight) root.scrollIntoView({behavior: 'smooth', block: 'nearest'});
       const hist = st.msgs.slice(0, -1).filter(m => m.content && !m.err).map(m => ({role: m.role, content: m.content.slice(0, 5900)})).slice(-MAX_HIST);
       const ai = st.msgs[st.msgs.length - 1]; st.ctrl = new AbortController();
       try {
@@ -136,103 +187,92 @@ const Assistant = (() => {
         }
       } catch (err) { if (err.name === 'AbortError') ai.notice = 'Stopped.'; else ai.err = err.message || 'Something went wrong.'; }
       if (!ai.content && !ai.err && !ai.notice) ai.err = 'No answer came back.';
-      st.ctrl = null; setBusy(false); view(st.msgs.length - 1); save();
+      st.ctrl = null; setBusy(false); view(st.msgs.length - 1); R.clear.hidden = false; save();
+      const T = thread(), u = T && T.querySelector('#m' + (st.msgs.length - 2));
+      if (T && u && T.scrollHeight > T.clientHeight) T.scrollTo({top: Math.max(0, u.offsetTop - 6), behavior: 'smooth'});   // start reading from the question, not the end
     }
-
-    // ---------- question bank
-    const tick = k => st.slots[k];
-    function slotHTML(k) {
-      if (st.other[k]) return `<input class="slot-in" data-slot="${k}" placeholder="ticker or name" aria-label="Company ${k}" value="${esc(st.other[k] === true ? '' : st.other[k])}" autocomplete="off">`;
-      const trending = st.tickers.map(t => `<option value="${esc(t.ticker)}" ${tick(k) === t.ticker ? 'selected' : ''}>${esc(t.ticker)} · ${esc(t.name.slice(0, 18))}</option>`).join('');
-      const have = new Set(st.tickers.map(t => t.ticker));
-      const pop = POPULAR.filter(t => !have.has(t)).map(t => `<option value="${t}" ${tick(k) === t ? 'selected' : ''}>${t}</option>`).join('');
-      return `<select class="slot" data-slot="${k}" aria-label="Company ${k}">${trending ? `<optgroup label="Trending now">${trending}</optgroup>` : ''}<optgroup label="Popular">${pop}</optgroup><option value="__other">Other…</option></select>`;
-    }
-    function renderBank() {
-      R.tabs.innerHTML = st.bank.map(c => `<button class="btab ${c.id === st.tab ? 'on' : ''}" data-tab="${c.id}" role="tab" aria-selected="${c.id === st.tab}">${c.icon} ${esc(c.title)}</button>`).join('');
-      const cat = st.bank.find(c => c.id === st.tab) || st.bank[0]; if (!cat) return;
-      R.list.innerHTML = cat.questions.map((q, i) => {
-        const parts = q.text.split(/(\{[AB]\})/).map(p => /^\{[AB]\}$/.test(p) ? slotHTML(p[1]) : esc(p)).join('');
-        return `<div class="qrow" style="--i:${i}" role="button" tabindex="0" data-q="${i}"><span class="qt">${parts}</span><button class="go" type="button" tabindex="-1" aria-label="Ask">➤</button></div>`;
-      }).join('');
-    }
-    async function resolveSlot(k) {
-      if (!st.other[k]) return tick(k);
-      const v = typeof st.other[k] === 'string' ? st.other[k].trim() : ''; if (!v) return null;
-      const r = await api('/api/search?q=' + encodeURIComponent(v)).catch(() => []);
-      const real = r.filter(x => !x.raw);                                       // genuine matches first
-      const exact = real.find(x => x.ticker.toUpperCase() === v.toUpperCase());  // "AAPL"
-      if (exact || real.length) return (exact || real[0]).ticker;               // "Tesla" -> TSLA
-      const sym = r.find(x => x.raw && x.ticker.toUpperCase() === v.toUpperCase());
-      return sym ? sym.ticker : null;                                           // unlisted symbol such as 0700.HK
-    }
-    async function askBank(qi) {
-      const q = (st.bank.find(c => c.id === st.tab) || {questions: []}).questions[qi]; if (!q) return;
-      if (st.busy) { App.toast('Still answering — one moment…'); return; }
-      const vals = {};
-      for (const k of q.slots) { vals[k] = await resolveSlot(k); if (!vals[k]) { App.toast('Pick a company for the question'); return; } }
-      if (q.slots.length === 2 && vals.A === vals.B) { App.toast('Pick two different companies to compare'); return; }
-      ask(q.text.replace(/\{([AB])\}/g, (_, k) => '$' + vals[k]));
-    }
-
     function setOpen(o) {
       st.open = o; root.classList.toggle('closed', !o); R.toggle.setAttribute('aria-expanded', o); R.toggle.setAttribute('aria-label', o ? 'Collapse assistant' : 'Expand assistant');
       try { localStorage.setItem('ask:open', o ? '1' : '0'); } catch {}
     }
 
-    // ---------- events
+    // ---------- company search box (autocomplete)
+    const hideDrops = () => R.main.querySelectorAll('.cp-drop').forEach(d => d.hidden = true);
+    async function showDrop(input) {
+      const drop = input.closest('.cp').querySelector('.cp-drop'), q = input.value.trim(), tok = ++st.pk.tok; let items, head = '';
+      if (!q) { items = st.tickers.slice(0, 8).map(t => ({ticker: t.ticker, name: t.name})); head = 'Trending now'; }
+      else { const r = await api('/api/search?q=' + encodeURIComponent(q)).catch(() => []); if (tok !== st.pk.tok) return; const real = r.filter(x => !x.raw); items = real.length ? real : r; }
+      st.pk.items = items; st.pk.act = 0; st.pk.picker = input.closest('.cp').dataset.picker;
+      drop.hidden = false;
+      drop.innerHTML = items.length ? (head ? `<h4>${head}</h4>` : '') + items.map((t, i) => `<button type="button" class="cp-item ${i === 0 ? 'act' : ''}" data-pick="${i}"><b>${esc(t.ticker)}</b><span>${esc(t.name)}</span></button>`).join('')
+        : '<div class="cp-empty">No match — try a ticker like AAPL or 0700.HK</div>';
+    }
+    function pick(item) {
+      const picker = st.pk.picker; const co = {ticker: item.ticker, name: item.raw ? item.ticker : item.name};
+      if (picker === 'compare') return askCompare(co);
+      st.company = co; st.compare = false; go('company');
+    }
+    function askCompare(b) {
+      const a = st.company; if (b.ticker === a.ticker) { App.toast('Pick a different company to compare'); return; }
+      ask(`Compare $${a.ticker} with $${b.ticker}`, {kind: 'company', ticker: a.ticker, name: a.name, text: cat('company').questions.find(q => q.slots.length > 1).text});
+    }
+    let dt;
+    R.main.addEventListener('input', e => { if (!e.target.matches('.cp-input')) return; clearTimeout(dt); dt = setTimeout(() => showDrop(e.target), 150); });
+    R.main.addEventListener('focusin', e => { if (e.target.matches('.cp-input') && !e.target.value) showDrop(e.target); });
+    R.main.addEventListener('keydown', e => {
+      if (!e.target.matches('.cp-input')) return; const drop = e.target.closest('.cp').querySelector('.cp-drop'), n = st.pk.items.length;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (drop.hidden) { showDrop(e.target); return; } e.preventDefault(); if (!n) return;
+        st.pk.act = (st.pk.act + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; drop.querySelectorAll('.cp-item').forEach((b, i) => b.classList.toggle('act', i === st.pk.act)); drop.querySelector('.act')?.scrollIntoView({block: 'nearest'}); }
+      else if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); st.pk.picker = e.target.closest('.cp').dataset.picker;
+        if (!drop.hidden && n && st.pk.items[st.pk.act]) pick(st.pk.items[st.pk.act]);
+        else if (v) showDrop(e.target).then(() => st.pk.items[0] && pick(st.pk.items[0])); }
+      else if (e.key === 'Escape') hideDrops();
+    });
+    document.addEventListener('click', e => { if (!e.target.closest('.cp')) hideDrops(); });
+
+    // ---------- clicks
+    R.main.addEventListener('click', e => {
+      const t = e.target, $ = s => t.closest(s);
+      let el;
+      if ((el = $('[data-pick]'))) { st.pk.picker = el.closest('.cp').dataset.picker; pick(st.pk.items[+el.dataset.pick]); }
+      else if ((el = $('[data-go]'))) { const g = el.dataset.go; if (g === 'compare') go('company', {compare: true, company: st.ctx?.ticker ? {ticker: st.ctx.ticker, name: st.ctx.name} : st.company}); else if (g === 'chat') go('chat'); else go('home', {compare: false}); }
+      else if ((el = $('[data-company]'))) { st.company = {ticker: el.dataset.company, name: el.dataset.name}; st.compare = false; go('company'); }
+      else if ((el = $('[data-cmp]'))) askCompare({ticker: el.dataset.cmp, name: el.dataset.name});
+      else if ((el = $('[data-compare-toggle]'))) go('company', {compare: !st.compare});
+      else if ((el = $('[data-topic]'))) go('topic', {topic: el.dataset.topic});
+      else if ((el = $('[data-stop]'))) st.ctrl?.abort();
+      else if ((el = $('[data-ask]'))) { let ctx = null; try { ctx = JSON.parse(el.dataset.ctx || 'null'); } catch {} ask(el.dataset.ask, ctx); }
+      else if ((el = $('[data-act]'))) {
+        if (el.dataset.act === 'copy') { navigator.clipboard?.writeText(st.msgs[+el.dataset.i].content); el.textContent = '✓ Copied'; setTimeout(() => el.textContent = '⧉ Copy', 1400); }
+        else { st.msgs.pop(); const u = st.msgs[st.msgs.length - 1]; if (u?.role === 'user') ask(u.content, st.ctx, {regen: true}); }
+      }
+    });
     R.toggle.onclick = () => setOpen(!st.open);
     root.querySelector('.ask-head').addEventListener('click', e => { if (!st.open && !e.target.closest('button')) setOpen(true); });
-    R.tabs.onclick = e => { const b = e.target.closest('[data-tab]'); if (b) { st.tab = b.dataset.tab; renderBank(); } };
-    R.list.addEventListener('change', e => {
-      const sel = e.target.closest('select.slot'); if (!sel) return; const k = sel.dataset.slot;
-      if (sel.value === '__other') { st.other[k] = true; renderBank(); sel.closest('.qrow') && R.list.querySelector(`.qrow[data-q="${sel.closest('.qrow').dataset.q}"] .slot-in`)?.focus(); }
-      else { st.slots[k] = sel.value; R.list.querySelectorAll(`select.slot[data-slot="${k}"]`).forEach(x => x.value = sel.value); }   // keep every row's picker in sync
-    });
-    R.list.addEventListener('input', e => { const inp = e.target.closest('input.slot-in'); if (!inp) return; const k = inp.dataset.slot;
-      st.other[k] = inp.value || true; R.list.querySelectorAll(`input.slot-in[data-slot="${k}"]`).forEach(x => { if (x !== inp) x.value = inp.value; }); });
-    R.list.addEventListener('click', e => { if (e.target.closest('select, input')) return; const r = e.target.closest('.qrow'); if (r) askBank(+r.dataset.q); });
-    R.list.addEventListener('keydown', e => {
-      if (e.target.matches('.slot-in') && e.key === 'Enter') { e.preventDefault(); askBank(+e.target.closest('.qrow').dataset.q); }
-      else if (e.target.matches('.qrow') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); askBank(+e.target.dataset.q); }
-    });
-    R.peek.onclick = e => { const b = e.target.closest('[data-pq]'); if (b) { setOpen(true); ask(b.dataset.pq); } };
-    R.stop.onclick = () => st.ctrl?.abort();
-    R.clear.onclick = () => { st.ctrl?.abort(); st.msgs = []; save(); setBusy(false); renderThread(); };
-    root.addEventListener('click', e => {
-      const a = e.target.closest('[data-act]'); if (!a) return;
-      if (a.dataset.act === 'copy') { navigator.clipboard?.writeText(st.msgs[+a.dataset.i].content); a.textContent = '✓ Copied'; setTimeout(() => a.textContent = '⧉ Copy', 1400); }
-      if (a.dataset.act === 'regen' || a.dataset.act === 'retry') { st.msgs.pop(); const u = st.msgs[st.msgs.length - 1]; if (u?.role === 'user') ask(u.content, {regen: true}); }
-    });
-    // free-text composer (only shown for local-model / Claude engines)
+    R.peek.onclick = e => { const b = e.target.closest('[data-pq]'); if (b) { setOpen(true); ask(b.dataset.pq, JSON.parse(b.dataset.ctx)); } };
+    R.clear.onclick = () => { st.ctrl?.abort(); st.msgs = []; st.ctx = null; st.busy = false; save(); go('home'); };
+
+    // free-text composer (local-model / Claude engines only)
     const grow = () => { R.box.style.height = 'auto'; R.box.style.height = Math.min(R.box.scrollHeight, 130) + 'px'; R.send.disabled = st.busy || !R.box.value.trim(); };
     R.box.oninput = grow;
     R.box.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); R.form.requestSubmit(); } };
     R.form.onsubmit = e => { e.preventDefault(); const t = R.box.value; if (!t.trim() || st.busy) return; R.box.value = ''; grow(); ask(t); };
 
-    // ---------- initial render, then load config + data
-    R.empty.innerHTML = `<div class="orb big"><span>✨</span></div><h3>Choose a question</h3><p>Pick one from the question bank — I’ll pull live trends, prices, news, filings and earnings to answer.</p>
-      <div class="uses"><span class="tag">📈 Trends</span><span class="tag">💹 Prices &amp; technicals</span><span class="tag">📅 Earnings</span><span class="tag">🏛 SEC filings</span></div>`;
-    setOpen(st.open); renderThread(); R.list.innerHTML = '<div class="skel" style="height:56px"></div><div class="skel" style="height:56px"></div>';
+    // ---------- load config + data, then show home
+    setOpen(st.open);
     const [bank, status, trending] = await Promise.all([api('/api/chat/questions').catch(() => []), api('/api/chat/status').catch(() => st.status), api('/api/trends?hours=24&limit=10').catch(() => [])]);
-    st.bank = bank; st.status = status; st.tickers = trending.map(t => ({ticker: t.ticker, name: t.name}));
-    st.slots = {A: (st.tickers[0] || {ticker: 'AAPL'}).ticker, B: (st.tickers[1] || {ticker: 'MSFT'}).ticker};
-    renderBank();
-    R.peek.innerHTML = '<span class="src" style="align-self:center">Try:</span>' + bank.flatMap(c => c.questions).filter(q => q.featured).map(q => `<button class="chip" data-pq="${esc(q.text)}">${esc(q.text)}</button>`).join('');
-
+    st.bank = bank; st.status = status; st.tickers = trending.map(t => ({ticker: t.ticker, name: t.name, tone: t.tone}));
+    R.peek.innerHTML = '<span class="sec-lbl">Try</span>' + bank.flatMap(c => c.questions.filter(q => q.featured).map(q => `<button class="pop" data-pq="${esc(q.text)}" ${ctxAttr({kind: 'topic', id: c.id, text: q.text})}>${esc(q.text)}</button>`)).join('');
     const p = status.provider, free = p === 'ollama' || p === 'claude';
     R.badge.hidden = false;
     R.badge.textContent = {rules: '🧩 Built-in · no AI', ollama: '🦙 ' + status.model + ' · local', claude: '⚡ ' + status.model}[p] || status.model;
     R.badge.title = {rules: 'Answers come from rules over your own data — no AI model, no cost', ollama: 'Running on your machine via Ollama — no API cost', claude: 'Claude API — uses API credits'}[p] || '';
     if (status.reason) { R.banner.hidden = false; R.banner.textContent = 'ℹ ' + status.reason; }
     R.form.hidden = !free;
-    if (free) R.sub.textContent = 'Pick a question from the bank, or type your own.';
-    if (status.web_search) { R.web.hidden = false; const paint = () => { R.web.classList.toggle('on', st.web); R.web.setAttribute('aria-pressed', st.web); }; paint();
-      R.web.onclick = () => { st.web = !st.web; try { localStorage.setItem('chat:web', st.web ? '1' : '0'); } catch {} paint(); App.toast(st.web ? '🌐 Web search on for your next questions' : 'Web search off'); }; }
-    R.foot.innerHTML = p === 'rules' ? `🧩 <b>Built-in assistant</b> — instant, free, no AI.
-      <details><summary>Want free-form questions?</summary><p>Run a local model: install <a href="https://ollama.com" target="_blank" rel="noopener" style="color:var(--a1);font-weight:700">Ollama</a>, then <code>ollama pull llama3.1</code> and start the server with <code>FINTREND_CHAT=ollama</code>.</p>
-      <p>Or use Claude: <code>ANTHROPIC_API_KEY=…</code> <code>FINTREND_CHAT=claude</code>.</p></details>` : '';
-    grow();
+    if (free) R.sub.textContent = 'Pick a topic below, or type your own question.';
+    if (status.web_search) { R.web.hidden = false; const paintW = () => { R.web.classList.toggle('on', st.web); R.web.setAttribute('aria-pressed', st.web); }; paintW();
+      R.web.onclick = () => { st.web = !st.web; try { localStorage.setItem('chat:web', st.web ? '1' : '0'); } catch {} paintW(); App.toast(st.web ? '🌐 Web search on for your next questions' : 'Web search off'); }; }
+    render(); grow();
     return {ask};
   }
   return {mount};

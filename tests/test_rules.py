@@ -182,5 +182,9 @@ def test_bank_shape_and_endpoint(seeded):
     assert all(qq["slots"] == [s for s in "AB" if "{" + s + "}" in qq["text"]] for qq in allq)
     assert sum(qq["featured"] for qq in allq) == 3 and not any(qq["slots"] for qq in allq if qq["featured"])
     assert max(len(qq["text"]) for qq in allq) < 80 and BANK[1]["questions"][-1]["slots"] == ["A", "B"]
+    assert all(x["blurb"] and x["icon"] and x["title"] for x in data)                   # topic cards need a name, icon and blurb
+    slotted = [qq for qq in allq if qq["slots"]]
+    assert slotted and all(qq["label"] and qq["icon"] and qq["hint"] for qq in slotted)  # company action tiles need labels
+    assert len({qq["label"] for qq in slotted}) == len(slotted)
     r = c.get("/chat", follow_redirects=False)
     assert r.status_code == 307 and r.headers["location"] == "/#ask"                 # old page moved to the dashboard
