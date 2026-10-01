@@ -32,22 +32,26 @@ FINTREND_DB=demo.db FINTREND_DEMO=1 DISABLE_SCHEDULER=1 python -m uvicorn app.ma
 ## Pages
 | Path | What it shows |
 |---|---|
-| `/` | Dashboard: top-3 spotlight, ranked trends with sparklines, expandable headlines, rising-fast, latest press releases, ticker tape |
+| `/` | Dashboard: **FinTrend AI assistant card (question bank + chat)**, top-3 spotlight, ranked trends with sparklines, expandable headlines, rising-fast, latest press releases, ticker tape |
 | `/earnings` | Quarterly earnings calendar: grouped by day, before-open/after-close, EPS estimate, "trending" flag, day jump chips |
 | `/markets` | Trend "bubble cloud" + per-region breakdown |
 | `/feed` | Searchable feed of news, press releases and SEC 8-K filings with region and time filters |
 | `/company/{ticker}` | Price chart (line/candles, 1D–1Y), stock summary, next earnings, mentions-over-time, sources, regions, related companies |
-| `/chat` | **FinTrend AI** — streaming chat assistant grounded in the app's own data (trends, prices & technicals, news, filings, earnings) |
 | `/status` | Next scheduled runs (live countdown), per-source health, run history, "Run now" |
 
 Click any trending row on the dashboard to expand it into a price chart. The search box in the top bar (press `/`) finds
 any ticker or company and previews its price, ranges, volume, news count and next earnings; Enter opens the full page.
 Light/dark theme toggle (top right) remembers your choice.
 
-## Assistant (`/chat`) — works with no AI and no key
-Ask things like "what looks bullish right now?", "give me a full read on $NVDA", "compare $AAPL and $MSFT", "who reports
-earnings this week?" or "what is RSI?". Answers stream in with tool-activity chips, Markdown tables and clickable `$TICKER`
-links. Three interchangeable engines share the same tools (trending companies, price action + technicals, company news and
+## Assistant (dashboard card) — works with no AI and no key
+The assistant is a card on the dashboard (collapsible; `/chat` redirects there). You choose from a **question bank** — four tabs
+(Market pulse · Companies · Earnings & filings · Learn), ~25 questions such as "What looks bullish right now?", "Who reports
+earnings this week?" or "What is RSI?". Company questions have the company as an inline dropdown — "Give me a full read on
+[NVDA ▾]", "Compare [TSLA ▾] with [AAPL ▾]" — populated with what's trending now plus popular names, or choose **Other…** and
+type a ticker or company name. Answers stream in with tool-activity chips, Markdown tables and clickable `$TICKER` links.
+The free-text box only appears with the local-model or Claude engines (below), since only those can handle open-ended questions.
+The question list lives in `app/question_bank.py`, and a test checks that every question is understood by the built-in
+assistant, so the menu and the answers can't drift apart. Three interchangeable engines share the same tools (trending companies, price action + technicals, company news and
 8-K filings, keyword search, earnings calendar, market overview) and the same UI — pick one with `FINTREND_CHAT`:
 
 | `FINTREND_CHAT` | Engine | Cost | Best for |

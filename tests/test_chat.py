@@ -178,7 +178,7 @@ def test_api_defaults_to_builtin_assistant_without_any_key(seeded, monkeypatch):
     _clear_env(monkeypatch)
     from app.main import app
     c = TestClient(app)
-    assert c.get("/chat").status_code == 200
+    assert c.get("/").status_code == 200
     st = c.get("/api/chat/status").json()
     assert st == dict(provider="rules", model="Built-in assistant", requested="rules", reason=None, web_search=False)
     r = c.post("/api/chat", json={"messages": [{"role": "user", "content": "What is trending and bullish right now?"}]})

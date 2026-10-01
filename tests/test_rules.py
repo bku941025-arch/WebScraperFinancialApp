@@ -31,6 +31,7 @@ def tickers(q):
 def test_ticker_extraction(seeded):
     assert tickers("Compare AAPL and Microsoft") == ["AAPL", "MSFT"]               # symbol + curated name, in order
     assert tickers("how is $nvda doing") == ["NVDA"]                                # cashtag, any case
+    assert tickers("thoughts on $OPENAI?") == ["OPENAI"]                            # six-letter cashtag
     assert tickers("thoughts on apple?") == ["AAPL"]                                # lower-case curated alias
     assert tickers("Tell me about Palantir") == ["PLTR"]                            # Capitalised SEC-name first word
     assert tickers("when does 7203.T report") == ["7203.T"] and tickers("0700.HK news") == ["0700.HK"]
@@ -148,3 +149,38 @@ def test_dispatch_through_chat_stream(seeded, monkeypatch):
         return [json.loads(x[6:]) async for x in chat.stream_chat([{"role": "user", "content": "what is RSI?"}])]
     ev = asyncio.run(go())
     assert ev[0]["type"] == "delta" and ev[-1]["type"] == "done"
+
+
+# ---------- the question bank (dashboard menu) must stay in sync with the built-in assistant
+def _bank_cases():
+    from app.question_bank import BANK
+    return [(c["id"], qq) for c in BANK for qq in c["questions"]]
+
+
+def _fill(text):
+    return text.replace("{A}", "$NVDA").replace("{B}", "$AAPL")
+
+
+@pytest.mark.parametrize("cat,qq", _bank_cases(), ids=lambda v: v if isinstance(v, str) else v["text"][:40])
+def test_every_bank_question_is_understood(seeded, cat, qq):
+    text = _fill(qq["text"])
+    assert R.classify(text, tickers(text)) == qq["expect"], text
+    answer, ev = ask(text)
+    assert len(answer) > 60 and ev[-1]["type"] == "done" and not any(e["type"] == "error" for e in ev)
+    assert "didn’t recognise" not in answer and "don’t have data" not in answer
+
+
+def test_bank_shape_and_endpoint(seeded):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.question_bank import BANK
+    c = TestClient(app)
+    data = c.get("/api/chat/questions").json()
+    assert [x["id"] for x in data] == ["pulse", "company", "calendar", "learn"]
+    allq = [qq for x in data for qq in x["questions"]]
+    assert len(allq) == len({qq["text"] for qq in allq}) >= 20                       # no duplicates, a decent menu
+    assert all(qq["slots"] == [s for s in "AB" if "{" + s + "}" in qq["text"]] for qq in allq)
+    assert sum(qq["featured"] for qq in allq) == 3 and not any(qq["slots"] for qq in allq if qq["featured"])
+    assert max(len(qq["text"]) for qq in allq) < 80 and BANK[1]["questions"][-1]["slots"] == ["A", "B"]
+    r = c.get("/chat", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/#ask"                 # old page moved to the dashboard

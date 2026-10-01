@@ -57,6 +57,7 @@ def test_search(dbfile):
         raw = universe.search(c, "0700.HK")
         assert raw[-1] == {"ticker": "0700.HK", "name": "Look up 0700.HK", "raw": True}
         assert not any(r.get("raw") for r in universe.search(c, "aap"))      # real prefix match -> no "look up" noise
+        assert not any(r.get("raw") for r in universe.search(c, "tesla"))    # a company-name match needs no "look up TESLA" entry
         assert universe.search(c, "%%__;;") == [] and universe.search(c, "") == []
 
 

@@ -21,7 +21,7 @@ global first american united national general international capital financial ba
 technologies systems holdings partners resources fund income growth value digital blue green power real star west north
 south east pacific atlantic bearish bullish right there their these those some many most other after before during
 since while would could should might filings filing report reports reporting results price prices""".split())
-CASH_RE = re.compile(r"\$([A-Za-z]{1,5}(?:[.-][A-Za-z])?)\b")
+CASH_RE = re.compile(r"\$([A-Za-z]{1,6}(?:[.-][A-Za-z]{1,2})?)\b")
 INTL_RE = re.compile(r"\b(\d{4,6}\.[A-Z]{1,2}|[A-Z]{2,6}\.[A-Z]{1,2})\b")
 UPPER_RE = re.compile(r"\b[A-Z]{2,5}(?:-[A-Z])?\b")
 CAP_RE = re.compile(r"\b[A-Z][a-z]{3,}\b")

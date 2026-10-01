@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FinTrend — Dashboard</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script></head>
+<title>FinTrend — Dashboard</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js"></script><script src="/static/assistant.js"></script></head>
 <body>
 <div id="tape"></div>
 <div class="wrap">
@@ -15,6 +15,7 @@
       <div class="stat"><div class="n" style="font-size:22px;padding:5px 0" id="s-next">–</div><div class="l" id="s-next-l">next scheduled scrape</div></div>
     </div>
   </section>
+  <section id="ask" aria-label="Ask FinTrend AI"></section>
   <div class="controls">
     <div class="chips" id="hours"></div>
     <div class="chips" id="regions"></div>
@@ -34,6 +35,7 @@
 <script>
 App.ready('/', () => {
   const {$, esc, spark, tonePill, ago, safeUrl} = App;
+  Assistant.mount($('#ask'));
   const st = {hours: +(App.store.get('hours') || 24), region: '', q: '', data: [], open: new Set()};
   const HOURS = [[6, '6h'], [24, '24h'], [72, '3 days'], [168, '7 days']];
   const chips = (el, items, key) => { $(el).innerHTML = items.map(([v, l]) =>

@@ -88,6 +88,6 @@ def search(conn: sqlite3.Connection, q: str, limit: int = 8) -> list[dict]:
     ordered = sorted(cands.values())[:limit]
     nm = names(conn, [c[2] for c in ordered])
     out = [dict(ticker=c[2], name=nm[c[2]]) for c in ordered]
-    if TICKER_RE.match(q) and not any(c[0] <= 1 for c in ordered):  # no exact/prefix ticker match
+    if TICKER_RE.match(q) and not any(c[0] <= 2 for c in ordered):  # no ticker or company-name-prefix match
         out.append(dict(ticker=qu, name=f"Look up {qu}", raw=True))  # any Yahoo-style symbol, e.g. 0700.HK
     return out

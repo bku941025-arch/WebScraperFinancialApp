@@ -9,10 +9,10 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import chat, db, earnings, quotes, scheduler, scraper, trends, universe
+from . import chat, db, earnings, question_bank, quotes, scheduler, scraper, trends, universe
 from .sources import SOURCES
 
 MARKETS = scheduler.parse_markets(os.getenv("SCHEDULE_MARKETS", "US"))
@@ -131,6 +131,11 @@ class ChatIn(BaseModel):
     web: bool = False
 
 
+@app.get("/api/chat/questions")
+def api_chat_questions():
+    return question_bank.BANK
+
+
 @app.get("/api/chat/status")
 async def api_chat_status():
     return await chat.status()
@@ -186,9 +191,14 @@ async def api_refresh():
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/earnings": "earnings.html", "/chat": "chat.html", "/status": "status.html"}
+PAGES = {"/": "index.html", "/markets": "markets.html", "/feed": "feed.html", "/earnings": "earnings.html", "/status": "status.html"}
 for _path, _file in PAGES.items():
     app.get(_path, include_in_schema=False)(lambda f=_file: FileResponse(STATIC / f))
+
+
+@app.get("/chat", include_in_schema=False)
+def chat_moved():
+    return RedirectResponse("/#ask")  # the assistant now lives on the dashboard
 
 
 @app.get("/company/{ticker}", include_in_schema=False)
