@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FinTrend</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--fg:#e6e8ee;--mut:#8b91a1;--acc:#4ea1ff;--up:#3ecf8e;--pr:#f5a524}
+@media(prefers-color-scheme:light){:root{--bg:#f4f5f8;--card:#fff;--fg:#1a1d24;--mut:#6a7080;--acc:#1f6feb;--up:#17915f;--pr:#b97300}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:16px;max-width:1200px;margin:auto}
+h1{margin:0;font-size:20px;flex:1}select,button{background:var(--card);color:var(--fg);border:1px solid #2a2f3a;border-radius:8px;padding:7px 10px;font:inherit}
+button{cursor:pointer}main{display:grid;grid-template-columns:2fr 1fr;gap:16px;padding:0 16px 32px;max-width:1200px;margin:auto}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.tk{font-weight:700;color:var(--acc)}.mut{color:var(--mut);font-size:13px}.up{color:var(--up)}.pr{color:var(--pr)}
+.bar{height:4px;background:var(--acc);border-radius:2px;margin:6px 0 8px}
+a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}ul{margin:6px 0 0;padding-left:18px}
+h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
+</style></head><body>
+<header><h1>📈 FinTrend</h1>
+<select id="hours"><option value="6">Last 6h</option><option value="24" selected>Last 24h</option><option value="72">Last 3d</option><option value="168">Last 7d</option></select>
+<select id="region"><option value="">All regions</option></select>
+<button id="refresh">Refresh feeds</button></header>
+<main><section><h2>Trending companies &amp; assets</h2><div id="trends"></div></section>
+<aside><h2>Latest press releases &amp; announcements</h2><div id="ann"></div></aside></main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ago=t=>{const m=Math.max(0,(Date.now()/1000-t)/60|0);return m<60?m+'m ago':m<1440?(m/60|0)+'h ago':(m/1440|0)+'d ago'};
+const safeUrl=u=>/^https?:\/\//i.test(u)?esc(u):'#';
+async function load(){
+  const q=new URLSearchParams({hours:$('hours').value});if($('region').value)q.set('region',$('region').value);
+  const [t,a]=await Promise.all([fetch('/api/trends?'+q).then(r=>r.json()),fetch('/api/announcements').then(r=>r.json())]);
+  const max=Math.max(1,...t.map(x=>x.score));
+  $('trends').innerHTML=t.length?t.map(x=>`<div class="card"><div class="row"><span><span class="tk">${esc(x.ticker)}</span> ${esc(x.name)}</span>
+    <span class="mut">${x.mentions} mentions · ${x.sources} sources${x.press_releases?` · <span class="pr">${x.press_releases} PR</span>`:''}${x.momentum>0?` · <span class="up">▲${x.momentum}</span>`:''}</span></div>
+    <div class="bar" style="width:${x.score/max*100}%"></div><ul>${x.headlines.map(h=>`<li><a href="${safeUrl(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a> <span class="mut">${esc(h.source)} · ${ago(h.published_at)}</span></li>`).join('')}</ul></div>`).join('')
+    :'<div class="card mut">No data yet — click “Refresh feeds”.</div>';
+  $('ann').innerHTML=a.map(x=>`<div class="card"><a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>
+    <div class="mut">${esc(x.source)} · ${ago(x.published_at)}${x.tickers.length?' · '+x.tickers.map(esc).join(', '):''}</div></div>`).join('')||'<div class="card mut">None yet.</div>';
+}
+fetch('/api/regions').then(r=>r.json()).then(rs=>rs.forEach(r=>$('region').add(new Option(r,r))));
+$('hours').onchange=$('region').onchange=load;
+$('refresh').onclick=async()=>{$('refresh').textContent='Fetching…';await fetch('/api/refresh',{method:'POST'});$('refresh').textContent='Refresh feeds';load()};
+load();setInterval(load,60000);
+</script></body></html>
